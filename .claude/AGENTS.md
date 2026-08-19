@@ -1,9 +1,10 @@
 # Sala de Tela — monorepo
 
-Porte do projeto `discord-streaming` (Vite + Express + WS, JS em DOM na mão)
-para Next.js 16 + TypeScript + Tailwind v4. O código de referência está em
-`../discord-streaming/`; as specs em [specs/](specs/) são a fonte da verdade
-sobre **o que construir**, e o código antigo sobre **como se comporta**.
+Porte do projeto [`discord-streaming`](https://github.com/marceloedu2/discord-streaming) (Vite + Express
++ WS, JS em DOM na mão) para Next.js 16 + TypeScript + Tailwind v4. O código
+de referência fica em `../discord-streaming/`, no mesmo diretório-pai; as
+specs em [specs/](specs/) são a fonte da verdade sobre **o que construir**, e
+o código antigo sobre **como se comporta**.
 
 **Nomes de identificador em inglês; comentários e texto de interface em
 pt-BR.** O contrato do WebSocket e das rotas HTTP é herdado e não muda de nome

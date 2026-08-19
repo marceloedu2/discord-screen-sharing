@@ -7,10 +7,11 @@ O mesmo produto funciona como site normal, fora do Discord, com salas que você
 cria e compartilha por link.
 
 > **Reescrita em andamento.** Este repositório é o porte do
-> `discord-streaming` — que funciona hoje, em Vite +
-> Express + JavaScript — para Next.js 16 + TypeScript + Tailwind v4. O servidor
-> de tempo real já está de pé e testado; a interface ainda é um marcador. O que
-> falta, por fase, está no [roadmap](.claude/specs/11-roadmap.md).
+> [`discord-streaming`](https://github.com/marceloedu2/discord-streaming) — que funciona
+> hoje, em Vite + Express + JavaScript — para Next.js 16 + TypeScript +
+> Tailwind v4. O servidor de tempo real já está de pé e testado; a interface
+> ainda é um marcador. O que falta, por fase, está no
+> [roadmap](.claude/specs/11-roadmap.md).
 
 ---
 
@@ -234,8 +235,9 @@ Discord que a pessoa está mesmo no canal de voz. Sem ele o escopo cai para a
 instância da atividade — que vem do cliente e, portanto, é obscuridade, não
 segurança.
 
-> O túnel do `discord-streaming` (`npm run tunel`, com cloudflared) ainda não
-> foi portado para cá. Por enquanto, exponha a porta 3000 como preferir.
+> O túnel do [`discord-streaming`](https://github.com/marceloedu2/discord-streaming/tree/main/scripts) (`npm run tunel`,
+> com cloudflared) ainda não foi portado para cá. Por enquanto, exponha a
+> porta 3000 como preferir.
 
 ---
 
@@ -266,7 +268,7 @@ diferença entre "ainda não escrevi" e "quebrou" seja visível.
 Três módulos atravessam **sem reescrita** — não são interface, são pipeline de
 mídia, e reescrever só introduziria regressão:
 
-| Do projeto antigo | Vira | O que faz |
+| Do [projeto antigo](https://github.com/marceloedu2/discord-streaming) | Vira | O que faz |
 |---|---|---|
 | `client/src/player.js` | `app/src/lib/player.ts` | decodifica vídeo e desenha no canvas |
 | `client/src/audio.js` | `app/src/lib/audio.ts` | decodifica Opus e agenda a reprodução |
