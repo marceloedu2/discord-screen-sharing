@@ -2,25 +2,24 @@
   "name": "discord-screen-sharing",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "workspaces": [
+    "app",
+    "server"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.1",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "dev": "node scripts/up.mjs --dev",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run build && node scripts/up.mjs",
+    "types": "npm run types --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "node scripts/test-frontend.mjs",
+    "test:fast": "node scripts/test-frontend.mjs --fast",
+    "smoke": "node scripts/smoke.mjs",
+    "check": "npm run types && npm run lint && npm run test"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.1",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "axe-core": "^4.13.0",
+    "ws": "^8.18.3"
   }
 }

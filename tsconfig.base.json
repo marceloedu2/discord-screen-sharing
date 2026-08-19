@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // O relay é assíncrono de ponta a ponta e guarda estado entre mensagens.
+    // Estas três pegam a classe de erro que mais dói aqui: índice que pode não
+    // existir, propriedade opcional tratada como presente, e variável que o
+    // fluxo não garante ter sido escrita.
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true
+  }
+}
