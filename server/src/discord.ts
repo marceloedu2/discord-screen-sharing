@@ -52,7 +52,132 @@ export function loginUrl(redirectUri: string): string | null {
   return url.toString();
 }
 
+/**
+ * O nome da sala, montado a partir do canal de voz.
+ *
+ * `Categoria / Canal` quando o canal está numa categoria, só `Canal` quando
+ * não está — que é como o Discord mostra na barra lateral, e é assim que a
+ * pessoa reconhece de qual call se trata.
+ *
+ * Uma chamada só: a lista de canais do servidor traz o canal e a categoria
+ * dele juntos, e buscar os dois separadamente dobraria a ida à API do Discord
+ * numa hora em que alguém está esperando a sala abrir.
+ *
+ * @returns null quando não dá para saber — aí quem chama fica com o nome
+ *   genérico, que é melhor do que uma sala chamada "undefined".
+ */
+export async function channelName(guildId: string, channelId: string): Promise<string | null> {
+  if (!DISCORD_BOT_TOKEN) return null;
+
+  try {
+    const r = await fetch(`${API}/v10/guilds/${guildId}/channels`, {
+      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+    });
+    if (!r.ok) {
+      console.warn(`[canal] Discord respondeu ${r.status} ao listar canais`);
+      return null;
+    }
+
+    const canais = (await r.json()) as Array<{
+      id: string;
+      name?: string;
+      parent_id?: string | null;
+    }>;
+
+    const canal = canais.find((c) => c.id === channelId);
+    if (!canal?.name) return null;
+
+    const categoria = canal.parent_id
+      ? canais.find((c) => c.id === canal.parent_id)?.name
+      : undefined;
+
+    return categoria ? `${categoria} / ${canal.name}` : canal.name;
+  } catch (err) {
+    console.warn('[canal] falhou:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Como a pessoa se chama **naquele servidor**.
+ *
+ * O nome global do Discord raramente é o que a galera reconhece: quem está numa
+ * comunidade costuma usar apelido de servidor, e mostrar o global faz a pessoa
+ * aparecer com um nome que ninguém ali associa a ela.
+ *
+ * Ordem: apelido do servidor → nome de exibição global → usuário.
+ *
+ * @returns null quando não dá para saber — aí vale o nome que já veio do OAuth.
+ */
+export async function memberName(guildId: string, userId: string): Promise<string | null> {
+  if (!DISCORD_BOT_TOKEN) return null;
+
+  try {
+    const r = await fetch(`${API}/v10/guilds/${guildId}/members/${userId}`, {
+      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+    });
+    if (!r.ok) return null;
+
+    const m = (await r.json()) as {
+      nick?: string | null;
+      user?: { global_name?: string | null; username?: string };
+    };
+    return m.nick || m.user?.global_name || m.user?.username || null;
+  } catch (err) {
+    console.warn('[membro] falhou:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 export type Presence = 'in' | 'out' | 'unknown';
+
+/**
+ * Os três estados de "em que call esta pessoa está".
+ *
+ * Um tipo à parte, e não `string | null`, porque `indeterminado` não é o mesmo
+ * que `fora`: um é falta de visibilidade nossa — o bot não está no servidor —,
+ * e o outro é a pessoa realmente fora da call. Tratá-los igual tranca gente
+ * para fora por um problema que é nosso.
+ */
+export type Voz =
+  | { tipo: 'em'; canal: string }
+  | { tipo: 'fora' }
+  | { tipo: 'indeterminado' };
+
+/**
+ * Em qual canal de voz daquele servidor esta pessoa está.
+ *
+ * É o que sustenta a entrada por `/<id do servidor>`: quem abre esse endereço
+ * não veio pela Activity, então não há `channel_id` vindo do cliente — quem
+ * responde qual é o canal é o Discord, com o token do bot.
+ */
+export async function voiceChannelOf(guildId: string, userId: string): Promise<Voz> {
+  if (!DISCORD_BOT_TOKEN) return { tipo: 'indeterminado' };
+
+  try {
+    const r = await fetch(`${API}/v10/guilds/${guildId}/voice-states/${userId}`, {
+      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+    });
+
+    if (r.status === 404) {
+      // Mesma distinção de inVoiceChannel: "Unknown Guild" é falta de
+      // visibilidade nossa, não ausência da pessoa.
+      const err = (await r.json().catch(() => null)) as { code?: number } | null;
+      return err?.code === 10004 ? { tipo: 'indeterminado' } : { tipo: 'fora' };
+    }
+
+    if (!r.ok) {
+      console.warn(`[voz] Discord respondeu ${r.status} ao buscar o canal`);
+      return { tipo: 'indeterminado' };
+    }
+
+    const state = (await r.json()) as { channel_id?: string | null };
+    return state.channel_id ? { tipo: 'em', canal: state.channel_id } : { tipo: 'fora' };
+  } catch (err) {
+    console.warn('[voz] falhou:', err instanceof Error ? err.message : err);
+    return { tipo: 'indeterminado' };
+  }
+}
 
 /**
  * Confirma pelo Discord que a pessoa está mesmo naquela call.

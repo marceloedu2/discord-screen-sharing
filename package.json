@@ -11,6 +11,8 @@
     "dev": "node scripts/up.mjs --dev",
     "build": "npm run build --workspaces --if-present",
     "start": "npm run build && node scripts/up.mjs",
+    "tunnel": "node scripts/tunnel.mjs",
+    "tunnel:create": "node scripts/tunnel-create.mjs",
     "types": "npm run types --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "node scripts/test-frontend.mjs",
@@ -21,5 +23,6 @@
   "devDependencies": {
     "axe-core": "^4.13.0",
     "ws": "^8.18.3"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

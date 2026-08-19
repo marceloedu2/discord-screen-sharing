@@ -1,23 +1,16 @@
-import { Pendente } from "@/componentes/pendente";
+import { Room } from "@/components/room";
 
 /**
- * A sala: lobby, grade de telas, barra de controles.
+ * A sala: lobby, grade de pessoas e barra de controles.
  *
- * Ainda por portar de ../discord-streaming/client/src/main.js. O que vem junto
- * sem reescrita, porque não é interface, está em specs/01-produto.md.
+ * A rota é a mesma nos dois contextos, e o que muda é o estado — dentro do
+ * Discord ela entra direto na sala da call; fora, abre o lobby (RN-SAL-1,
+ * RN-SAL-2). Quem decide é o `frame_id` na query (RN-SES-1), lido pelo contexto
+ * que o layout monta.
+ *
+ * O componente é cliente porque tudo aqui depende de coisas que só existem no
+ * navegador: WebSocket, localStorage e o SDK do Discord.
  */
 export default function Page() {
-  return (
-    <Pendente
-      titulo="Sala"
-      origem="client/src/main.js"
-      fase="Fase 2 — Identidade e sala"
-      itens={[
-        "lobby e lista de salas",
-        "grade de pessoas e barra de controles",
-        "conexão do WebSocket em /ws",
-        "login pelo Discord e sessão de convidado",
-      ]}
-    />
-  );
+  return <Room />;
 }

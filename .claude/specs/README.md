@@ -31,7 +31,7 @@ está imposta pelo Discord, e a justificativa está em
 
 ```
 app/       tudo que o navegador vê — Next.js 16, App Router
-server/    relay WebSocket e estado das salas (ainda vazio; Fase 4)
+server/    relay WebSocket e estado das salas (pronto; falta o cliente alcançá-lo)
 scripts/   ferramental de validação, fora dos workspaces
 specs/     este diretório
 ```

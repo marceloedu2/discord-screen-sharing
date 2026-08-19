@@ -48,7 +48,7 @@ try {
   console.error('axe-core não encontrado. Rode "npm install" before de validar.');
   process.exit(1);
 }
-const AUDIT_SCRIPT = readFileSync(join(ROOT, 'scripts/audit-navegador.js'), 'utf8');
+const AUDIT_SCRIPT = readFileSync(join(ROOT, 'scripts/browser-audit.js'), 'utf8');
 
 const findings = [];
 /** @param {'error'|'warning'} severity */

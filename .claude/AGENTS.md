@@ -6,9 +6,20 @@ de referência fica em `../discord-streaming/`, no mesmo diretório-pai; as
 specs em [specs/](specs/) são a fonte da verdade sobre **o que construir**, e
 o código antigo sobre **como se comporta**.
 
-**Nomes de identificador em inglês; comentários e texto de interface em
-pt-BR.** O contrato do WebSocket e das rotas HTTP é herdado e não muda de nome
-— ver [specs/09-protocolo.md](specs/09-protocolo.md).
+**Tudo que é código em inglês; comentários e texto de interface em pt-BR.**
+Isso inclui **nomes de pasta e de arquivo**, componentes, props, variáveis e
+funções — `components/`, `stage.tsx`, `onClose`, `showPeople`. Só três coisas
+ficam em português: comentário, texto que a pessoa lê, e o que já está gravado
+no armazenamento de quem usa (as chaves `sala:<id>`, `volumePessoa`,
+`displayName` — renomeá-las orfanaria o ajuste de quem já entrou).
+
+O contrato do WebSocket e das rotas HTTP é herdado e não muda de nome — ver
+[specs/09-protocolo.md](specs/09-protocolo.md).
+
+> Cuidado ao renomear em massa: uma passada de regex sobre `\bnome\b` acerta
+> também o texto jurídico de `/termos` e os comentários. Renomeie só em linhas
+> de código, protegendo strings, comentários `//`, `/* */` **e `{/* */}` do
+> JSX** — e confira o texto contra a origem depois.
 
 ## A forma do repositório
 

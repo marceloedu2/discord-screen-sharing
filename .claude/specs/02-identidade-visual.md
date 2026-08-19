@@ -76,9 +76,23 @@ Escala herdada:
 É o que casa com o conjunto de ícones do Discord. Nada de biblioteca de ícones
 preenchidos.
 
-`RN-UI-4` · herdado · P0 — Quem transmite ganha **borda verde** (`--live`) de
-2px no tile, e fundo preto em vez de `--tile`. É o sinal que o Discord usa e o
-que quem assiste procura sem pensar.
+`RN-UI-3a` · novo · P1 — **Os botões da barra são redondos, de 46px**, agrupados
+numa pílula de fundo `--painel` com desfoque. O encerrar fica **fora** do grupo,
+em vermelho. Três estados de cor: neutro (`--tile`), ligado (`--vivo`) e
+encerrar (`--perigo`).
+
+`RN-UI-3b` · novo · P1 — **Menu flutuante cede à janela**: `min(306px, 100vw -
+24px)`. Largura fixa estoura numa janela estreita e o `overflow-hidden` da raiz
+o corta pela metade — o texto quebra em três linhas e o menu parece esmagado,
+sem nada indicando que ele está saindo da tela.
+
+`RN-UI-4` · refinado · P0 — Quem transmite ganha **fundo preto** em vez de
+`--tile` e um selo **`AO VIVO`** em vermelho ao lado do nome.
+
+A borda verde de 2px que esta regra pedia descrevia uma versão anterior do
+Discord. O de hoje usa o selo, e a moldura verde no palco vira um retângulo em
+volta de tudo que se está olhando. O `--vivo` continua no tema: ele é a cor de
+"ligado" nos botões da barra, como o do compartilhar tela quando ativo.
 
 ## Tema Tailwind v4
 
@@ -128,26 +142,48 @@ a sala, mas **não pode valer para as páginas de política** (`/termos`,
 `/privacidade`), que são texto longo. No porte isso vira escopo de layout, não
 regra global.
 
+Feito no grupo de rotas `app/src/app/(politicas)/`, cujo layout rola por conta
+própria. É onde o porte diverge do herdado, e o motivo é este requisito: no
+projeto antigo as duas eram HTML estático em `public/`, com folha de estilo
+própria — separação física em vez de escopo. Manter aquilo aqui significaria
+148 linhas de CSS à mão convivendo com o Tailwind, e duas páginas fora da
+auditoria de acessibilidade da suíte. O texto continua verbatim; só a moldura
+mudou.
+
 ## Componentes que o porte precisa
 
 Inventário do que existe hoje em DOM na mão e vira componente React. Cada um
 entra em [11-roadmap.md](11-roadmap.md) com fase.
 
+Os nomes são em inglês, como todo o resto do código.
+
 | Componente | Origem | Nota |
 |---|---|---|
-| `Pilula` | `.pill` | fundo translúcido + blur, lista ao passar o mouse |
-| `Botao` | `.btn`, `.btn.go`, `.btn.live`, `.btn.wide` | variantes explícitas, não booleanos soltos |
-| `Tile` | `.tile` | três estados: vídeo, convite, avatar |
+| `Pill` | `.pill` | fundo translúcido + blur, lista ao passar o mouse |
+| `Button` | `.btn`, `.btn.go`, `.btn.live`, `.btn.wide` | variantes explícitas, não booleanos soltos |
+| `Screen` | `.tile` | três estados: vídeo, convite, avatar |
 | `Avatar` | `.avatar` | imagem com fallback para iniciais em cor estável |
 | `Modal` | `.modal` + `.modal-card` | fecha no fundo e no `Esc` |
 | `Toast` | `.toast` | `role="status"`, `aria-live="polite"`, some em 6 s |
-| `MenuContexto` | `.tile-menu` | botão direito no tile |
-| `Dock` | `.dock` | ocupa espaço no layout, **não** flutua sobre o vídeo |
-| `Divisor` | `.divider` | arrastável, duplo clique restaura |
+| `TileMenu` | `.tile-menu` | botão direito no tile |
+| `BarraControles` | `.dock` | flutua sobre o vídeo, ao centro de baixo (`RN-UI-5a`) |
+| `Menu` | `.tile-menu` | o "…" da barra e o botão direito no tile |
 
-`RN-UI-5` · herdado · P1 — O dock **ocupa espaço no layout** em vez de flutuar
-sobre a tela. Sobrepor comeria justamente a parte de baixo do que está sendo
-mostrado, que é onde costuma ficar barra de tarefas e legenda.
+`RN-UI-5` · ~~herdado~~ **revogado** · P1 — O dock ocupava espaço no layout em
+vez de flutuar sobre a tela, para não comer a parte de baixo do que está sendo
+mostrado — que é onde costuma ficar barra de tarefas e legenda.
+
+`RN-UI-5a` · refinado · P1 — **Os controles flutuam sobre a tela, ao centro de
+baixo, numa pílula, com o encerrar em vermelho e separado do grupo.** É a
+geometria do Discord, e ela ganha de `RN-UI-5` pelo mesmo motivo que a paleta
+ganha (`RNF-UI-1`): a Activity roda dentro do cliente dele, e a call de voz está
+a dois centímetros usando esta forma. Uma barra em lugar diferente do esperado
+lê como site de terceiro invadindo a call.
+
+O custo continua real e conhecido: a faixa inferior da tela compartilhada fica
+coberta. O conteúdo reserva a altura da barra para os tiles não passarem por
+baixo dela; o que fica coberto é a imagem transmitida, e `RF-UI-2` (controles
+somem em tela cheia) existe para isso.
 
 `RN-UI-6` · herdado · P0 — Todo texto vindo de terceiro (nome de pessoa do
 Discord, nome de sala escrito por outra pessoa) é inserido como texto, nunca
@@ -163,9 +199,17 @@ iniciais, colorido por hash estável do id:
 function corDe(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  return `hsl(${Math.abs(hash) % 360} 45% 42%)`;
+  return `hsl(${Math.abs(hash) % 360} 45% 32%)`;
 }
 ```
 
-Mesma pessoa, mesma cor, em qualquer sessão e em qualquer máquina. Saturação e
-luminosidade fixas garantem contraste legível contra `--tile` em todos os matizes.
+Mesma pessoa, mesma cor, em qualquer sessão e em qualquer máquina.
+
+`RN-UI-7a` · refinado · P1 — A luminosidade é **32%**, e não os 42% do projeto
+antigo. O hash e a saturação seguem intactos; só este número muda, e por
+medição: com 42% as iniciais em branco davam 2,93:1 no matiz 60° (amarelo),
+abaixo do mínimo de 4,5:1. Como o matiz vem de um hash do id, a reprovação do
+axe aparecia ou não conforme o id sorteado — uma suíte intermitente, que é pior
+do que uma que falha sempre. A 32% o pior matiz dá 4,75:1 e os 360 passam.
+Escurecer mais não era opção pelo outro lado: abaixo disso o círculo deixa de
+se separar de `--tile`.

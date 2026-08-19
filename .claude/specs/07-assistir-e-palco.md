@@ -61,8 +61,33 @@ aproximando a call do Discord:
 | 5–9 | 3 |
 | 10+ | 4 |
 
-**Com transmissão — palco.** A tela escolhida ocupa a área principal e, ao lado,
-uma barra com as **outras telas em cima** e as **pessoas embaixo**.
+**Com transmissão — palco.** A tela escolhida ocupa a área principal e, **abaixo
+dela, uma faixa horizontal ao centro** com as outras telas primeiro e as pessoas
+depois.
+
+`RN-AST-8a` · refinado · P0 — **A grade é o padrão, e o foco é a alternativa.**
+A lateral com divisor arrastável saiu inteira; quem escolhe o layout é quem
+assiste, pelo menu do "…" (`RF-AST-13`).
+
+**Grade** — telas e pessoas em células iguais, telas primeiro (`RN-AST-10`),
+colunas pela tabela acima. É como está o "Exibição em grade" do Discord, e é o
+que o produto abre.
+
+**Foco** — uma tela ocupa a área principal e as demais, junto das pessoas, vão
+para uma **faixa horizontal centralizada embaixo**, em miniaturas de 186×104.
+
+Com isso caem `RF-AST-3` e `RN-AST-11`/`RN-AST-12`, que descreviam o divisor e a
+largura guardada — não há mais largura a arrastar.
+
+`RN-AST-8b` · novo · P1 — **A miniatura é um retângulo 16:9 fixo**, e não a
+altura do que estiver dentro. É nela que a webcam entra quando existir, e câmera
+esmagada não tem conserto no CSS de quem assiste. Em 104px de altura o avatar
+cai para 40px e o selo do nome para 11px — o tamanho cheio encosta um no outro.
+
+`RN-AST-8c` · novo · P1 — **Os selos ficam sobre a imagem, no tile**, e não numa
+barra de página: qualidade e `AO VIVO` no canto superior direito, nome com ícone
+de monitor no inferior esquerdo, os dois em fundo translúcido com desfoque. O
+canto de cima à direita é o que menos carrega informação numa captura de tela.
 
 Dar a grade inteira à tela esconderia quem está junto, e é a call que se perde
 nisso. Deixar tudo igual numa grade condena a tela que importa ao tamanho de um
@@ -97,12 +122,21 @@ não pode morrer no meio disso.
 
 ## Tela cheia
 
-`RF-AST-4` · herdado · P1 — Clique no tile do palco alterna tela cheia. `Esc`
-sai. O botão do dock faz o mesmo e só aparece quando há tela no palco.
+`RF-AST-4` · herdado · P1 — Duplo clique no tile do palco alterna tela cheia.
+`Esc` sai. O botão fica no **canto inferior direito**, sobre a tela, como no
+Discord, e só aparece quando há tela no palco.
 
-`RN-AST-13` · herdado · P0 — Tela cheia é **layout, não Fullscreen API**
-(`RN-UI-8`): a grade colapsa para uma coluna, o padding vai a zero e o raio do
-tile some. Funciona mesmo com a Permissions Policy `fullscreen` negada ao iframe.
+`RN-AST-13` · refinado · P0 — **Tenta a Fullscreen API; cai para layout quando
+ela é negada.**
+
+Fora do Discord a API existe e é o que a pessoa espera — é o mesmo que o F11 do
+navegador faz. Dentro da Activity ela é negada por Permissions Policy
+(`RN-UI-8`): o iframe não recebe `allow="fullscreen"` e a promessa rejeita sem
+nada acontecer na tela. Aí vale o layout herdado — o padding vai a zero, o raio
+do tile some e a faixa de miniaturas desaparece.
+
+O estado é sincronizado pelo evento `fullscreenchange`, e não só pelo nosso
+botão: sair pelo `Esc` ou pelo F11 do navegador deixaria o rótulo mentindo.
 
 `RN-AST-14` · herdado · P1 — **A barra de controles fica** em tela cheia. Sem
 ela não haveria saída visível — sair por tecla é atalho, não é caminho.
