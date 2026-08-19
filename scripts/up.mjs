@@ -101,6 +101,24 @@ export function ports() {
  */
 export function up({ dev = false, origin = null } = {}) {
   const p = ports();
+
+  // O .env da raiz, lido antes de espalhar o ambiente para os filhos.
+  //
+  // O servidor sabe carregá-lo sozinho com --env-file-if-exists, mas o app não
+  // pode: o binário do Next repassa os execArgv por NODE_OPTIONS, e essa flag
+  // não é permitida ali — o processo morre no arranque dizendo isso. Então quem
+  // lê é a porta de entrada, e os três herdam de uma fonte só, na raiz, que é o
+  // que o .env.example promete. Sem o arquivo, segue em silêncio: localhost
+  // funciona sem credencial nenhuma.
+  //
+  // Vem depois de ports(): as portas já foram resolvidas do ambiente de verdade,
+  // e o `...p` abaixo as reimpõe sobre o que o arquivo disser.
+  try {
+    process.loadEnvFile(path.join(ROOT, '.env'));
+  } catch {
+    // sem .env
+  }
+
   const base = { ...process.env, ...p };
   if (origin) base.PUBLIC_ORIGIN = origin;
 

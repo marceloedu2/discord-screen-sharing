@@ -37,6 +37,8 @@ export interface Viewer {
   watching: Set<number>;
   /** Slots de que já recebeu keyframe — delta em decoder frio só dá erro. */
   primed: Set<number>;
+  /** Quando avisamos desta pessoa sobre descarte pela última vez (RF-AST-18). */
+  avisadoEm?: number;
 }
 
 export interface PasswordHash {
@@ -79,6 +81,8 @@ export interface Claims {
   instance?: string;
   /** Canal de voz confirmado pelo Discord, quando houve confirmação. */
   call?: string;
+  /** O servidor daquela call. Serve para descobrir o nome do canal (RF-SAL-12). */
+  guild?: string;
   room?: string;
   role?: 'viewer' | 'broadcaster';
   exp?: number;

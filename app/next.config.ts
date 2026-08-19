@@ -11,7 +11,26 @@ import type { NextConfig } from 'next';
  * `upgrade` do WebSocket — coisa que rewrite de Next não faz. Duas regras de
  * roteamento em dois lugares divergem; uma só, não.
  */
+/**
+ * Em desenvolvimento o Next recusa pedido vindo de outra origem que não a
+ * local, e pelo túnel todo pedido vem de fora. O domínio sai do PUBLIC_ORIGIN
+ * em vez de ser cravado aqui: ele muda a cada túnel descartável, e um valor
+ * fixo no arquivo daria "funciona na minha máquina" com o sintoma escondido
+ * atrás de um aviso que ninguém lê.
+ */
+function origemDeDesenvolvimento(): string[] {
+  const bruto = process.env.PUBLIC_ORIGIN;
+  if (!bruto) return [];
+  try {
+    return [new URL(bruto).host];
+  } catch {
+    return [];
+  }
+}
+
 const nextConfig: NextConfig = {
+  allowedDevOrigins: origemDeDesenvolvimento(),
+
   // O Next escreve AGENTS.md e CLAUDE.md na pasta do app por conta própria.
   // Este repositório mantém os seus na raiz, onde valem para os dois
   // workspaces; um arquivo gerado a cada build entrando no git é ruído.

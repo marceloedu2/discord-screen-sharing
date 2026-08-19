@@ -235,9 +235,26 @@ Discord que a pessoa está mesmo no canal de voz. Sem ele o escopo cai para a
 instância da atividade — que vem do cliente e, portanto, é obscuridade, não
 segurança.
 
-> O túnel do [`discord-streaming`](https://github.com/marceloedu2/discord-streaming/tree/main/scripts) (`npm run tunel`,
-> com cloudflared) ainda não foi portado para cá. Por enquanto, exponha a
-> porta 3000 como preferir.
+### O túnel
+
+Para o Discord alcançar a sua máquina sem publicar nada:
+
+```bash
+npm run tunnel:create    # login na Cloudflare, cria o túnel, aponta o DNS
+npm run tunnel           # sobe o túnel; deixe a janela aberta
+```
+
+O `tunnel:create` pede um subdomínio de um domínio já ativo na sua conta da
+Cloudflare e escreve `TUNNEL_CONFIG` e `PUBLIC_ORIGIN` no `.env`. O endereço
+não muda mais, então o Target no portal do Discord é configurado uma vez só.
+
+Sem `TUNNEL_CONFIG`, o `npm run tunnel` abre um túnel descartável, com endereço
+novo a cada execução — serve para testar, mas o Target muda junto.
+
+O binário do cloudflared é baixado sob demanda para `.cache/`, então não há o
+que instalar antes. O túnel aponta para a **porta de entrada**, nunca para o
+app nem para o relay: é ela que roteia por caminho e repassa o `upgrade` do
+WebSocket.
 
 ---
 

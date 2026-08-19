@@ -136,7 +136,11 @@ const session: Handler = async ({ res, body }) => {
 
   // O canal entra no token assinado, não fica só na resposta: é o que permite
   // ao endpoint da sala da call confiar sem consultar o Discord de novo.
-  const confirmed = presence === 'in' && channelId ? { call: channelId } : {};
+  const guildId = str(body.guild_id);
+  const confirmed =
+    presence === 'in' && channelId
+      ? { call: channelId, ...(guildId ? { guild: guildId } : {}) }
+      : {};
   const identity = issueIdentity(instanceId, me.id, me.name, me.avatar, 8 * 60 * 60, confirmed);
 
   json(res, 200, { ...identity, call: presence === 'in' ? channelId : null });
@@ -204,11 +208,98 @@ const create: Handler = (ctx) => {
   json(ctx.res, 200, roomTokens(result.room.id, me));
 };
 
-const callRoom: Handler = (ctx) => {
+/**
+ * A sala de um canal de voz, alcançada por `/<id do servidor>`.
+ *
+ * Um servidor tem **N salas**, uma por canal de voz — por isso o endereço
+ * aceita `?room=`, que diz qual. Sem ele, vale a call em que a pessoa está
+ * agora.
+ *
+ * O `room` **não é credencial**. Ele vai ser colado em convite, e quem receber
+ * o link só entra se estiver naquela call: é a presença que autoriza, como na
+ * Activity (RN-SAL-4). Um link compartilhado para quem está fora não abre nada.
+ *
+ * Aqui não há `channel_id` vindo do cliente, então quem diz em qual call a
+ * pessoa está é o Discord. E estas salas seguem invisíveis para quem chega pela
+ * raiz: são `isCall`, e `listRooms` não lista `isCall` (RN-SAL-5).
+ *
+ * Convidado não entra: sem conta do Discord não há voz para consultar.
+ */
+const guildRoom: Handler = async (ctx) => {
   const me = identityOf(ctx);
   if (!me) return;
 
-  const room = rooms.ensureCallRoom(instanceOf(me), callRoomId(me));
+  const guildId = str(ctx.body.guild_id);
+  if (!guildId || !/^[0-9]{15,21}$/.test(guildId)) {
+    return fail(ctx.res, 400, 'servidor invalido');
+  }
+
+  if (me.uid.startsWith('guest-')) {
+    return fail(ctx.res, 401, 'Entre com o Discord para usar o link do servidor.');
+  }
+
+  const voz = await discord.voiceChannelOf(guildId, me.uid);
+
+  if (voz.tipo === 'indeterminado') {
+    return fail(
+      ctx.res,
+      503,
+      'Não consigo enxergar as calls deste servidor. Adicione o bot ao servidor, ' +
+        'ou dê a ele permissão de ver o seu canal de voz.'
+    );
+  }
+  if (voz.tipo === 'fora') {
+    return fail(ctx.res, 403, 'Você não está em nenhuma call deste servidor. Entre num canal de voz e tente de novo.');
+  }
+
+  const daMinhaCall = `call-${voz.canal}`;
+  const pedida = str(ctx.body.room);
+
+  // Veio um link de convite apontando para outra call. Recusar é o ponto:
+  // quem autoriza é estar lá, não ter o endereço.
+  if (pedida && pedida !== daMinhaCall) {
+    // O `code` deixa o cliente distinguir esta recusa das outras: aqui a pessoa
+    // **está** numa call, só que noutra — então cabe oferecer a dela, em vez de
+    // pedir que entre em alguma.
+    return fail(
+      ctx.res,
+      403,
+      'Esse link é de outra call.',
+      { code: 'outra-call' }
+    );
+  }
+
+  // A instância é o servidor, e o id da sala é o canal (RN-SAL-3): a call é
+  // estável, e é ela que define quem pode ver a tela de quem.
+  //
+  // O nome vem do próprio canal — "Categoria / Canal" — para a pessoa
+  // reconhecer de qual call se trata sem precisar decorar id nenhum.
+  const name = await discord.channelName(guildId, voz.canal);
+  const room = rooms.ensureCallRoom(`guild-${guildId}`, daMinhaCall, name);
+
+  // Como a pessoa se chama **neste servidor**. Se ela já escolheu um apelido
+  // no produto, ele manda: é escolha dela, e sobrescrevê-la a cada entrada
+  // faria o nome voltar sozinho (RN-SES-13).
+  const noServidor = await discord.memberName(guildId, me.uid);
+  const eu: Claims = noServidor ? { ...me, name: noServidor } : me;
+
+  json(ctx.res, 200, {
+    ...roomTokens(room.id, eu),
+    roomName: room.name,
+    user: { id: eu.uid, name: eu.name, avatar: eu.av ?? null },
+  });
+};
+
+const callRoom: Handler = async (ctx) => {
+  const me = identityOf(ctx);
+  if (!me) return;
+
+  // O nome vem do canal quando dá para saber qual é: o crachá da Activity
+  // carrega o servidor e o canal desde que a presença foi confirmada. Sem
+  // confirmação não há canal, e aí fica o nome genérico.
+  const name = me.guild && me.call ? await discord.channelName(me.guild, me.call) : null;
+
+  const room = rooms.ensureCallRoom(instanceOf(me), callRoomId(me), name);
   json(ctx.res, 200, roomTokens(room.id, me));
 };
 
@@ -265,10 +356,29 @@ const password: Handler = (ctx) => {
 
 // -------------------------------------------- login web (fora do Discord)
 
-const login: Handler = ({ res }) => {
+/**
+ * Só caminho local, e só o que este produto tem.
+ *
+ * O `goBack` vem da query, então ele é entrada de fora: sem esta guarda o
+ * endereço de login vira um redirecionador aberto — alguém manda
+ * `/auth/login?goBack=https://outro.site` e o Discord devolve a pessoa lá,
+ * carimbada de "veio do login do Discord".
+ */
+function destinoSeguro(bruto: string | null): string {
+  if (!bruto) return '/';
+  // Só a raiz ou /<id de servidor>. Nada de "//" nem de esquema.
+  return /^\/[0-9]{0,21}$/.test(bruto) ? bruto : '/';
+}
+
+const login: Handler = ({ res, query }) => {
   const url = discord.loginUrl(REDIRECT_URI);
   if (!url) return fail(res, 503, 'login do Discord nao configurado');
-  redirect(res, url);
+
+  // Para onde voltar depois. Vai no `state` do OAuth, que é o campo que existe
+  // exatamente para isto e volta intacto no callback.
+  const alvo = new URL(url);
+  alvo.searchParams.set('state', destinoSeguro(query.get('goBack')));
+  redirect(res, alvo.toString());
 };
 
 const callback: Handler = async ({ res, query }) => {
@@ -281,11 +391,18 @@ const callback: Handler = async ({ res, query }) => {
   const me = await discord.profileOf(accessToken);
   if (!me) return redirect(res, '/?erro=perfil_falhou');
 
-  const { identity } = issueIdentity(WEB_INSTANCE, me.id, me.name, me.avatar);
+  // 30 dias, como o crachá de convidado. Com 8 horas a pessoa reencontrava a
+  // tela de consentimento do Discord quase todo dia, e autorizar de novo o que
+  // já se autorizou lê como se algo tivesse dado errado.
+  const { identity } = issueIdentity(WEB_INSTANCE, me.id, me.name, me.avatar, 30 * 24 * 60 * 60);
+
+  // O `state` volta intacto do Discord, mas ele passou por fora — então é
+  // conferido de novo aqui, não só na ida.
+  const volta = destinoSeguro(query.get('state'));
 
   // No fragmento, não na query: o fragmento não é enviado ao servidor nem
   // aparece em log de proxy. O cliente lê e limpa da barra de endereço.
-  redirect(res, `/#identity=${encodeURIComponent(identity)}`);
+  redirect(res, `${volta}#identity=${encodeURIComponent(identity)}`);
 };
 
 // -------------------------------------------------------------------- tabela
@@ -299,6 +416,7 @@ export const routes: Record<string, Handler> = {
   'POST /api/rooms/list': list,
   'POST /api/rooms/create': create,
   'POST /api/rooms/call': callRoom,
+  'POST /api/rooms/guild': guildRoom,
   'POST /api/rooms/join': join,
   'POST /api/rooms/password': password,
 

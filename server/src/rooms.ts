@@ -22,10 +22,33 @@ import type { WebSocket } from 'ws';
 import type { Broadcast, CodecConfig, PasswordHash, Person, Room, Viewer } from './types.ts';
 
 const MAX_BROADCASTERS = 4;
+
+/**
+ * Teto de espectadores **por transmissão** (RF-AST-11).
+ *
+ * A banda de subida cresce linearmente com quem assiste (RN-TRX-34): a 8 Mbps o
+ * décimo espectador já pede 80 Mb/s de upload, que ninguém tem. Sem teto o
+ * sintoma não é uma recusa clara — é a transmissão de todo mundo degradando
+ * junto, com o backpressure descartando quadros sem ninguém entender por quê.
+ *
+ * É por transmissão, e não por sala (RN-AST-28): quatro telas com doze
+ * espectadores cada é banda de quatro transmissores diferentes.
+ */
+const MAX_VIEWERS_PER_STREAM = Number(process.env.MAX_VIEWERS_PER_STREAM) || 12;
 // Sala é objeto em memória criado por qualquer pessoa autenticada: sem teto,
 // um laço de "criar sala" consome a RAM do processo.
 const MAX_ROOMS_PER_INSTANCE = 20;
 const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Espaçamento do aviso de descarte ao espectador (RF-AST-18).
+ *
+ * Sem isto, quem está com rede ruim recebe um aviso por quadro perdido — dezenas
+ * por segundo, no mesmo socket que já não dá conta. Um a cada 2 s basta para o
+ * indicador de qualidade saber que o problema é do lado de quem assiste, e não
+ * de quem transmite — que é justamente a pergunta que se faz nessa hora.
+ */
+const AVISO_DESCARTE_MS = 2000;
 const MAX_NAME = 32;
 const MAX_ROOM_NAME = 40;
 
@@ -165,16 +188,18 @@ export const getRoom = (id: unknown): Room | null =>
  * Não tem dono nem senha — quem controla o acesso é a própria call, já que só
  * entra quem o Discord confirmou estar conectado ao canal.
  */
-export function ensureCallRoom(instance: string, id: string): Room {
+export function ensureCallRoom(instance: string, id: string, name?: string | null): Room {
   const existing = rooms.get(id);
   if (existing) {
     // A instância da Activity muda a cada relançamento no mesmo canal; o canal
     // é que é estável. Sem atualizar, a sala sumiria da lista após um relaunch.
     existing.instance = instance;
+    // O canal pode ter sido renomeado no Discord desde que a sala nasceu.
+    if (name) existing.name = name;
     return existing;
   }
 
-  const room = blankRoom(id, instance, 'Sala da call');
+  const room = blankRoom(id, instance, name || 'Sala da call');
   room.isCall = true;
   room.ownerName = 'a call';
 
@@ -257,6 +282,19 @@ function toViewers(room: Room, obj: unknown): void {
 
 // O avatar vai junto do nome: a lista de quem assiste mostra as fotos, e sem
 // isto sobrava só a inicial colorida para quem tem foto no Discord.
+/**
+ * Avisa o espectador de que estamos descartando quadros dele (RF-AST-18).
+ *
+ * Antes disto o descarte só incrementava um contador no log, e o indicador de
+ * qualidade não distinguia rede de quem assiste de rede de quem transmite.
+ */
+function avisarDescarte(viewer: Viewer, slot: number): void {
+  const agora = Date.now();
+  if (agora - (viewer.avisadoEm ?? 0) < AVISO_DESCARTE_MS) return;
+  viewer.avisadoEm = agora;
+  sendJson(viewer.ws, { type: 'dropped', slot });
+}
+
 function watchersOf(room: Room, slot: number): Person[] {
   const byId = new Map<string, Person>();
   for (const v of room.viewers.values()) {
@@ -416,6 +454,7 @@ export function relayChunk(room: Room, b: Broadcast, chunk: Buffer): void {
     if (isAudio) {
       if (v.ws.bufferedAmount > MAX_BUFFERED_BYTES) {
         room.droppedChunks++;
+        avisarDescarte(v, b.slot);
         continue;
       }
       v.ws.send(chunk);
@@ -428,6 +467,7 @@ export function relayChunk(room: Room, b: Broadcast, chunk: Buffer): void {
       // pedir de novo.
       if (v.ws.bufferedAmount > MAX_BUFFERED_BYTES * 2) {
         room.droppedChunks++;
+        avisarDescarte(v, b.slot);
         continue;
       }
       v.ws.send(chunk);
@@ -481,6 +521,11 @@ export function watch(room: Room, ws: WebSocket, slot: number): void {
   // sala inteira — um cliente em laço faria o servidor inundar todo mundo.
   if (viewer.watching.has(slot)) return;
 
+  if (watchersOf(room, slot).length >= MAX_VIEWERS_PER_STREAM) {
+    sendJson(ws, { type: 'error', message: 'Esta tela já está no limite de espectadores.' });
+    return;
+  }
+
   viewer.watching.add(slot);
   viewer.primed.delete(slot);
 
@@ -520,6 +565,23 @@ export function attachViewer(room: Room, ws: WebSocket, info: Person): void {
 export function detachViewer(room: Room, ws: WebSocket): void {
   if (!room.viewers.delete(ws)) return;
   broadcastState(room);
+}
+
+/**
+ * Fecha a sala agora, se ela ficou vazia (RN-SAL-20a).
+ *
+ * A carência de 12 s existe para a **queda**: recarregar a atividade desconecta
+ * e reconecta, e sem ela quem estivesse sozinho perderia a sala a cada F5. Sair
+ * de propósito é outra coisa — ali não há reconexão a esperar, e deixar a sala
+ * de pé por mais 12 segundos só faz ela aparecer vazia na lista de quem está
+ * olhando o lobby naquele instante.
+ *
+ * Só quem sai é que chama isto. A queda continua passando pelo varredor.
+ */
+export function closeIfEmpty(room: Room): void {
+  if (room.viewers.size > 0 || room.broadcasters.size > 0) return;
+  rooms.delete(room.id);
+  console.log(`[room ${room.id}] fechada por quem saiu`);
 }
 
 export const stats = () =>

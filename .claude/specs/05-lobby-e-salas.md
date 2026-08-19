@@ -24,6 +24,40 @@ estável. Sem isso, a sala sumiria a cada relaunch.
 controla o acesso é a própria call: só entra quem o Discord confirmou estar
 conectado ao canal.
 
+`RF-SAL-11` · novo · P1 — **A sala de um servidor é alcançada por
+`/<id do servidor>`**, fora do Discord. O app pergunta ao Discord em qual canal
+de voz a pessoa está naquele servidor e **entra direto** na sala daquele canal,
+criando na primeira que chega. Um servidor tem **N salas**, uma por canal.
+
+Entra direto, sem tela de confirmação: quem abre o link quer a sala, e um clique
+no meio só atrasaria. A tela de "você saiu" existe, mas **depois** de sair — é
+ela que impede o laço, já que a pessoa continua na call e o arranque a
+recolocaria na sala no mesmo instante.
+
+`RN-SAL-24` · novo · P0 — O `?room=` desse endereço **não é credencial**. Ele
+existe para ser colado em convite, e quem recebe só entra se estiver naquela
+call — é a presença que autoriza, como em `RN-SAL-4`.
+
+`RF-SAL-13` · novo · P1 — Quando o link é de outra call **e a pessoa está numa
+call**, a recusa não é um erro: é o link errado para o momento. A tela diz isso
+e oferece a sala da call em que ela está, com um botão para o link padrão do
+servidor (`/<id>`, sem `?room=`).
+
+`RN-SAL-26` · novo · P1 — A recusa carrega um **código** (`outra-call`), não só
+o status. Dois 403 diferentes — "você não está em call nenhuma" e "você está,
+mas noutra" — pedem saídas diferentes, e decidir por texto de mensagem quebraria
+na primeira vez que ele mudasse.
+
+`RN-SAL-25` · novo · P1 — Esse caminho **exige conta do Discord**: sem ela não
+há voz para consultar. Convidado recebe 401 com o texto pedindo o login. A raiz
+segue aceitando convidado normalmente (`RF-SES-3`).
+
+`RF-SAL-12` · novo · P2 — **O nome da sala é o do canal de voz**:
+`Categoria / Canal` quando o canal está numa categoria, só `Canal` quando não
+está. É como o Discord mostra na barra lateral, e é assim que a pessoa
+reconhece de qual call se trata sem decorar id nenhum. Vale para os dois
+caminhos — o link de servidor e a Activity.
+
 `RN-SAL-5` · herdado · P1 — A sala da call **não aparece na lista**. Dentro do
 Discord a atividade entra nela direto; no site ela nunca poderia ser aberta.
 Listá-la seria mostrar uma porta que não abre.
@@ -124,6 +158,16 @@ processo. É aceito: elas duram minutos e o id é aleatório.
 verificado a cada 4 s. A carência existe porque recarregar a atividade
 desconecta e reconecta — sem ela, quem estivesse sozinho perderia a sala a cada
 F5. Vazia = zero espectadores **e** zero transmissores.
+
+`RN-SAL-20a` · novo · P1 — **Quem sai de propósito não espera a carência.** Se
+a última pessoa clicou em sair, a sala é dissolvida na hora.
+
+A carência existe para a queda, e sair é o contrário dela: não há reconexão a
+esperar. Segurar a sala por mais 12 segundos só a faz aparecer vazia para quem
+estiver olhando o lobby naquele instante.
+
+Quem separa os dois casos é a mensagem `leave`, mandada antes de o socket
+fechar. Sem ela o servidor vê os dois do mesmo jeito — um socket que fechou.
 
 `RF-SAL-7` · herdado · P1 — Quando a sala some, o servidor manda `room-gone`. No
 Discord o cliente **recria e volta para a sala da call**; no site, avisa

@@ -67,9 +67,28 @@ o que não vale a complexidade para salas que vivem minutos.
 
 ## O crachá
 
-`RN-SES-11` · herdado · P0 — O crachá é um token assinado pelo servidor
-(`SESSION_SECRET`), sem biblioteca externa, com validade de **8 horas**. Carrega:
-`{ instance, uid, name, av, scope: 'identity', call? }`.
+`RN-SES-11` · refinado · P0 — O crachá é um token assinado pelo servidor
+(`SESSION_SECRET`), sem biblioteca externa. Carrega:
+`{ instance, uid, name, av, scope: 'identity', call?, guild? }`.
+
+A validade é de **8 horas na Activity** e **30 dias fora dela**. Dentro do
+Discord o login é automático e sem tela, então expirar não custa nada; fora, com
+8 horas a pessoa reencontrava a tela de consentimento quase todo dia — e
+autorizar de novo o que já se autorizou lê como se algo tivesse dado errado.
+
+`RF-SES-9` · novo · P1 — **Sair da conta** existe no perfil, e só para quem
+entrou pelo Discord: convidado não tem o que largar. Sair descarta o crachá e o
+apelido, e emite uma identidade de convidado — é o caminho de desfazer os 30
+dias. Os tokens de sala guardados morrem junto: eles carregam o `uid` de quem os
+pediu, e reusá-los com outra identidade colocaria a pessoa na sala com o nome
+antigo.
+
+`RF-SES-10` · novo · P1 — Na sala de um servidor, o nome exibido é o **apelido
+daquele servidor** (`nick`), caindo para o nome global e depois para o usuário.
+O nome global raramente é o que a galera reconhece: quem está numa comunidade
+costuma usar apelido de servidor. Um apelido escolhido aqui (`RN-SES-13`)
+continua mandando — sobrescrevê-lo a cada entrada faria a escolha da pessoa
+desaparecer sozinha.
 
 `RN-SES-12` · herdado · P0 — O cliente **decodifica sem validar** apenas para
 descartar o que já venceu, e não tentar usar um token morto. Quem valida a

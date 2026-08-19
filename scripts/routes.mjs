@@ -16,15 +16,30 @@ export const ROUTES = [
     name: 'home',
     path: '/',
     // Texto que precisa existir depois do load — prova que a tela renderizou
-    // de verdade, e não só devolveu 200 com body vazio.
-    expectText: null,
-    flows: [],
+    // de verdade, e não só devolveu 200 com body vazio. Vale a pena escolher
+    // algo que só esta tela diz: o título aparece em todas.
+    expectText: 'Criar sala',
+    flows: [
+      {
+        name: 'criar sala e entrar',
+        steps: [
+          // --exact é obrigatório aqui: sem ele "Criar" casa também com o
+          // "Criar sala" que fica atrás do modal, e o passo clica no botão
+          // errado sem reclamar.
+          ['find', 'role', 'button', 'click', '--name', 'Criar sala', '--exact'],
+          ['fill', '#nomeSala', 'Sala de teste'],
+          ['find', 'role', 'button', 'click', '--name', 'Criar', '--exact'],
+        ],
+        // Entrou: o nome da sala passa a aparecer no dock.
+        expectText: 'Sala de teste',
+      },
+    ],
   },
 
   // ------------------------------------------------------------------ fase 1
-  // { name: 'share', path: '/share', expectText: 'Compartilhar tela', flows: [] },
-  // { name: 'terms', path: '/termos', expectText: 'Termos', flows: [] },
-  // { name: 'privacy', path: '/privacidade', expectText: 'Privacidade', flows: [] },
+  { name: 'share', path: '/share', expectText: 'Compartilhar tela', flows: [] },
+  { name: 'terms', path: '/termos', expectText: 'Termos de Serviço', flows: [] },
+  { name: 'privacy', path: '/privacidade', expectText: 'Política de Privacidade', flows: [] },
   //
   // ------------------------------------------------------------------ fase 2
   // A sala é a mesma rota "/" em outro estado; o que muda é o fluxo:

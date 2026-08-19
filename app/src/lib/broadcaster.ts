@@ -1,0 +1,851 @@
+/**
+ * Pipeline de transmissão: captura → codifica → envia. Porte de
+ * shared/broadcaster.js — tipagem por cima, lógica intacta.
+ *
+ * Sem WebRTC porque a Activity não tem (RN-PRO-2), e sem MediaRecorder porque o
+ * container impõe piso de latência (RN-TRX-3). WebCodecs codifica quadro a
+ * quadro e envia direto.
+ */
+
+// H264 costuma ter encoder por hardware; VP8 quase sempre cai em software, que
+// a 1080p derruba o framerate. Por isso as duas variantes de H264 vêm antes:
+// annexb dispensa o blob `description`, e avcC é aceito onde annexb não é
+// (RN-TRX-12).
+const CANDIDATES: Array<Partial<VideoEncoderConfig> & { codec: string }> = [
+  { codec: 'avc1.42E01E', avc: { format: 'annexb' } },
+  { codec: 'avc1.42E01E' },
+  { codec: 'vp8' },
+  { codec: 'vp09.00.10.08' },
+];
+
+/** Keyframe periódico: seguro barato para quem reconecta (RN-TRX-19). */
+const KEYFRAME_EVERY_MS = 3000;
+
+// O áudio anda pelo mesmo socket e pelo mesmo cabeçalho do vídeo: um canal só,
+// um formato só, e o servidor continua repassando o buffer sem abrir nada.
+const TIPO_KEYFRAME = 1;
+const TIPO_DELTA = 2;
+const TIPO_AUDIO = 3;
+
+/** Opus estéreo a 96 kbps: transparente, e ruído perto do vídeo (RN-TRX-27). */
+const AUDIO_BITRATE = 96_000;
+
+/** Teto de resolução (RN-TRX-14). A imagem é reduzida, nunca cortada. */
+const MAX_W = 1920;
+const MAX_H = 1080;
+
+const even = (n: number) => Math.max(2, n - (n % 2));
+
+/**
+ * Reduz proporcionalmente até caber no teto. Nunca corta.
+ *
+ * O preset "Leve" baixa o teto para 720p (RN-TRX-36) pelo mesmo caminho — só
+ * muda o número, não a regra.
+ */
+function fitWithin(w: number, h: number, maxH: number): { width: number; height: number } {
+  const maxW = Math.round((MAX_W / MAX_H) * maxH);
+  const scale = Math.min(1, maxW / w, maxH / h);
+  return { width: even(Math.round(w * scale)), height: even(Math.round(h * scale)) };
+}
+
+/** Motivo pelo qual este navegador não consegue transmitir, ou null. */
+export function supportError({ requireChromium = false } = {}): string | null {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    return 'Este navegador não permite captura de tela. Navegador de celular não suporta captura — use um desktop.';
+  }
+  if (!('VideoEncoder' in window) || !('VideoFrame' in window) || !('EncodedVideoChunk' in window)) {
+    return 'Este navegador não tem WebCodecs, necessário para transmitir. Use Chrome, Edge ou outro navegador Chromium no desktop.';
+  }
+  // Exigência de produto, não de capacidade (RN-TRX-4): o caminho via <video>
+  // funciona em Firefox e Safari, mas a captura sai visivelmente pior.
+  if (requireChromium && !('MediaStreamTrackProcessor' in window)) {
+    return 'Transmitir exige um navegador Chromium — Chrome, Edge, Brave ou Opera. Nos outros a captura fica com qualidade ruim, então está desabilitada. Você continua podendo assistir.';
+  }
+  return null;
+}
+
+export interface BroadcastStatus {
+  codec: string;
+  width: number;
+  height: number;
+  direct: boolean;
+}
+
+export interface BroadcastStats {
+  viewers: number;
+  fps: number;
+  mbps: number;
+  seconds: number;
+}
+
+/** O que a prévia mostra antes de qualquer byte sair (RF-TRX-12). */
+export interface Previa {
+  track: MediaStreamTrack;
+  width: number;
+  height: number;
+  hasSound: boolean;
+  soundBlocked: boolean;
+}
+
+export interface Broadcaster {
+  /** Capture e prepara, **sem enviar nada** (RN-TRX-38). */
+  preparar: () => Promise<Previa>;
+  /** A faixa capturada, para a prévia desenhar. null antes de preparar. */
+  faixaPreparada: () => MediaStreamTrack | null;
+  /** Conecta e começa a enviar o que `preparar` deixou pronto. */
+  goLive: () => Promise<MediaStream>;
+  /** Preparar e ir ao ar de uma vez, para quem não quer prévia. */
+  start: () => Promise<MediaStream>;
+  stop: (reason?: string) => void;
+  changeScreen: () => Promise<MediaStream>;
+  trocarSom: () => Promise<MediaStreamTrack>;
+  setQuality: (opts: { bitrate?: number; fps?: number; maxHeight?: number }) => void;
+  getSettings: () => { bitrate: number; fps: number };
+  hasSound: () => boolean;
+  soundBlocked: () => boolean;
+  isRunning: () => boolean;
+}
+
+export function createBroadcaster({
+  wsUrl,
+  bitrate,
+  fps,
+  audio = false,
+  maxHeight = MAX_H,
+  onStatus,
+  onStats,
+  onEnd,
+  onError,
+  onAviso,
+}: {
+  wsUrl: string;
+  bitrate: number;
+  fps: number;
+  audio?: boolean;
+  /** Teto de altura. 720 no preset Leve; 1080 no resto (RF-TRX-11). */
+  maxHeight?: number;
+  onStatus?: (info: BroadcastStatus) => void;
+  onStats?: (stats: BroadcastStats) => void;
+  onEnd?: (reason: string) => void;
+  onError?: (msg: string) => void;
+  onAviso?: (msg: string) => void;
+}): Broadcaster {
+  let ws: WebSocket | null = null;
+  let stream: MediaStream | null = null;
+  let encoder: VideoEncoder | null = null;
+  let reader: ReadableStreamDefaultReader<VideoFrame> | null = null;
+  let audioEncoder: AudioEncoder | null = null;
+  let audioReader: ReadableStreamDefaultReader<AudioData> | null = null;
+  // Pediram som, mas a superfície escolhida traria o Discord junto. Guardado
+  // para a interface poder oferecer a saída em vez de só avisar e esquecer.
+  let soundBlocked = false;
+  let video: HTMLVideoElement | null = null;
+  let config: VideoEncoderConfig | null = null;
+  let stage: HTMLCanvasElement | null = null;
+  let stageCtx: CanvasRenderingContext2D | null = null;
+
+  let running = false;
+  let mySlot = 0;
+  let wantKeyframe = true;
+  let lastKeyframeAt = 0;
+  let srcW = 0;
+  let srcH = 0;
+  let startedAt = 0;
+  let bytes = 0;
+  let frames = 0;
+  let viewers = 0;
+  let statsTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Restrições da captura de som (RN-TRX-25).
+   *
+   * Os tratamentos de voz ficam desligados: existem para microfone e, em som de
+   * aplicativo, cortam justamente o que se queria ouvir. `restrictOwnAudio` tira
+   * da captura o que esta própria página está tocando — sem ele, quem transmite
+   * enquanto assiste devolve o som da outra tela para a sala, em laço.
+   */
+  function audioConstraints(): MediaTrackConstraints {
+    const c: MediaTrackConstraints = {
+      systemAudio: 'include',
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    };
+    if (navigator.mediaDevices.getSupportedConstraints().restrictOwnAudio) {
+      c.restrictOwnAudio = true;
+    }
+    return c;
+  }
+
+  /**
+   * Devolve a faixa de som, ou null quando ela traria a call de volta em eco
+   * (RN-TRX-24).
+   *
+   * O som do sistema é capturado como uma mistura única, e nenhum navegador
+   * expõe um jeito de tirar um processo dela. O Windows tem essa API — é assim
+   * que o Discord nativo compartilha som sem se ouvir —, mas página web não
+   * alcança. Então "som da tela inteira" é sempre "som do sistema INTEIRO", com
+   * a saída do Discord dentro. Aba é diferente: o som sai só dali.
+   */
+  function prepararSom(videoTrack: MediaStreamTrack, capturado: MediaStream): MediaStreamTrack | null {
+    const faixa = capturado.getAudioTracks()[0];
+    if (!faixa) return null;
+
+    if (videoTrack.getSettings().displaySurface === 'browser') return faixa;
+
+    faixa.stop();
+    capturado.removeTrack(faixa);
+    soundBlocked = true;
+    onAviso?.(
+      'A tela inteira carrega o som do Discord junto, e a call se ouviria em eco. ' +
+        'Transmitindo sem som — use "Som de uma aba" para escolher de onde vem o áudio.'
+    );
+    return null;
+  }
+
+  function onAudioEncoded(chunk: EncodedAudioChunk): void {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+
+    const data = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(data);
+    ws.send(empacotar(TIPO_AUDIO, chunk.timestamp, data));
+    bytes += 18 + data.byteLength;
+  }
+
+  /**
+   * Capture, codifica e envia o som.
+   *
+   * O AudioEncoder recebe os blocos no tamanho que o sistema entregar e devolve
+   * pacotes Opus de 20 ms. Cada pacote se decodifica sozinho, então não existe
+   * aqui o equivalente ao keyframe (RN-AUD-1).
+   */
+  async function pumpAudio(track: MediaStreamTrack): Promise<void> {
+    if (!('AudioEncoder' in window) || !('MediaStreamTrackProcessor' in window)) return;
+
+    const s = track.getSettings();
+    const sampleRate = s.sampleRate ?? 48_000;
+    const numberOfChannels = Math.min(2, s.channelCount ?? 2);
+
+    try {
+      audioEncoder = new AudioEncoder({
+        output: onAudioEncoded,
+        // Som é acessório: se o encoder cair, a tela continua no ar (RN-TRX-29).
+        error: (err) => console.warn('[audio encoder]', err.message),
+      });
+      audioEncoder.configure({ codec: 'opus', sampleRate, numberOfChannels, bitrate: AUDIO_BITRATE });
+    } catch (err) {
+      console.warn('[audio encoder]', err instanceof Error ? err.message : err);
+      audioEncoder = null;
+      return;
+    }
+
+    // O mesmo caminho do vídeo: quem chega depois recebe isto ao pedir a tela.
+    ws?.send(
+      JSON.stringify({
+        type: 'audio-config',
+        config: { codec: 'opus', sampleRate, numberOfChannels },
+      })
+    );
+
+    audioReader = new MediaStreamTrackProcessor<AudioData>({ track }).readable.getReader();
+    while (running) {
+      let data: AudioData;
+      try {
+        const { done, value } = await audioReader.read();
+        if (done || !value) break;
+        data = value;
+      } catch {
+        break;
+      }
+
+      if (audioEncoder?.state === 'configured') {
+        try {
+          audioEncoder.encode(data);
+        } catch (err) {
+          console.warn('[audio encode]', err instanceof Error ? err.message : err);
+        }
+      }
+      data.close();
+    }
+  }
+
+  async function pickConfig(width: number, height: number): Promise<VideoEncoderConfig | null> {
+    // Duas passadas (RN-TRX-13): navegadores que não conhecem `latencyMode`
+    // recusam a configuração inteira por causa dela. Mais latência é melhor que
+    // nada.
+    for (const realtime of [true, false]) {
+      for (const candidate of CANDIDATES) {
+        const cfg: VideoEncoderConfig = { ...candidate, width, height, bitrate, framerate: fps };
+        if (realtime) cfg.latencyMode = 'realtime';
+        try {
+          const { supported } = await VideoEncoder.isConfigSupported(cfg);
+          if (supported) return cfg;
+        } catch {
+          // candidato inválido neste navegador; tenta o próximo
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * [1B slot][1B tipo][8B timestamp][8B relógio de envio][payload]
+   *
+   * O slot vem carimbado na origem para o servidor repassar o buffer intacto
+   * (RN-PRO-17), e o relógio de envio é o que permite medir o atraso do outro
+   * lado. Áudio e vídeo compartilham o formato (RN-PRO-18).
+   */
+  function empacotar(kind: number, timestamp: number, data: Uint8Array): ArrayBuffer {
+    const buf = new ArrayBuffer(18 + data.byteLength);
+    const view = new DataView(buf);
+    view.setUint8(0, mySlot);
+    view.setUint8(1, kind);
+    view.setFloat64(2, timestamp);
+    view.setFloat64(10, Date.now());
+    new Uint8Array(buf, 18).set(data);
+    return buf;
+  }
+
+  function serializeConfig(dc: VideoDecoderConfig): Record<string, unknown> {
+    const out: Record<string, unknown> = {
+      codec: dc.codec,
+      codedWidth: dc.codedWidth,
+      codedHeight: dc.codedHeight,
+    };
+    if (dc.description) {
+      const b = new Uint8Array(
+        dc.description instanceof ArrayBuffer ? dc.description : (dc.description as ArrayBufferView).buffer
+      );
+      let bin = '';
+      for (const x of b) bin += String.fromCharCode(x);
+      out.description = btoa(bin);
+    }
+    return out;
+  }
+
+  function onEncoded(chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata): void {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+
+    // O decoderConfig chega no primeiro chunk e sempre que a config muda.
+    if (metadata?.decoderConfig) {
+      ws.send(JSON.stringify({ type: 'config', config: serializeConfig(metadata.decoderConfig) }));
+    }
+
+    const data = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(data);
+
+    const buf = empacotar(chunk.type === 'key' ? TIPO_KEYFRAME : TIPO_DELTA, chunk.timestamp, data);
+    ws.send(buf);
+    bytes += buf.byteLength;
+  }
+
+  /**
+   * Mantém o encoder casado com o tamanho real da fonte (RN-TRX-18).
+   *
+   * displayWidth/Height e não codedWidth/Height: o codificado inclui padding de
+   * alinhamento do codec, e configurar o encoder por ele recorta as bordas.
+   */
+  function syncSize(frame: VideoFrame): void {
+    const sw = frame.displayWidth;
+    const sh = frame.displayHeight;
+    if (!sw || !sh || (sw === srcW && sh === srcH) || !config || !encoder) return;
+
+    srcW = sw;
+    srcH = sh;
+    const target = fitWithin(sw, sh, maxHeight);
+
+    if (target.width !== config.width || target.height !== config.height) {
+      config = { ...config, ...target };
+      encoder.configure(config);
+      // Reconfigurar força keyframe: o decoder do outro lado foi recriado e
+      // volta a precisar de ponto de partida (RN-TRX-21).
+      wantKeyframe = true;
+      onStatus?.({
+        codec: config.codec,
+        width: target.width,
+        height: target.height,
+        direct: 'MediaStreamTrackProcessor' in window,
+      });
+    }
+
+    // fitWithin preserva a proporção, então reduzir não corta nada.
+    if (target.width === sw && target.height === sh) {
+      stage = null;
+      stageCtx = null;
+    } else {
+      stage = document.createElement('canvas');
+      stage.width = target.width;
+      stage.height = target.height;
+      stageCtx = stage.getContext('2d', { alpha: false, desynchronized: true });
+    }
+  }
+
+  function encodeFrame(frame: VideoFrame): boolean {
+    if (!running || encoder?.state !== 'configured') {
+      frame.close();
+      return false;
+    }
+    // Backpressure: fila no encoder vira latência que nunca mais sai (RN-TRX-16).
+    if (encoder.encodeQueueSize > 2) {
+      frame.close();
+      return true;
+    }
+
+    const timestamp = frame.timestamp;
+    syncSize(frame);
+
+    const now = Date.now();
+    if (now - lastKeyframeAt > KEYFRAME_EVERY_MS) wantKeyframe = true;
+
+    let out = frame;
+    if (stage && stageCtx) {
+      stageCtx.drawImage(frame, 0, 0, stage.width, stage.height);
+      frame.close();
+      out = new VideoFrame(stage, { timestamp });
+    }
+
+    try {
+      encoder.encode(out, { keyFrame: wantKeyframe });
+      if (wantKeyframe) {
+        lastKeyframeAt = now;
+        wantKeyframe = false;
+      }
+    } catch (err) {
+      console.error('[encode]', err);
+    }
+
+    // frame.close() sempre depois de usar: VideoFrame segura memória de GPU, e
+    // sem isso a aba trava em segundos (RN-TRX-17).
+    out.close();
+    frames++;
+    return true;
+  }
+
+  /** Chromium: acesso direto aos quadros, sem cópia intermediária (RN-TRX-22). */
+  async function pumpDirect(track: MediaStreamTrack): Promise<void> {
+    reader = new MediaStreamTrackProcessor<VideoFrame>({ track }).readable.getReader();
+    while (running) {
+      let frame: VideoFrame;
+      try {
+        const { done, value } = await reader.read();
+        if (done || !value) break;
+        frame = value;
+      } catch {
+        break;
+      }
+      if (!encodeFrame(frame)) break;
+    }
+  }
+
+  /**
+   * Demais navegadores: extrai os quadros de um `<video>` alimentado pela stream.
+   *
+   * O elemento fica no DOM mas fora do fluxo (RN-TRX-23): alguns navegadores não
+   * decodificam um elemento solto, e `display: none` chega a pausar a
+   * reprodução.
+   */
+  function pumpViaVideo(): void {
+    const el = document.createElement('video');
+    video = el;
+    el.muted = true;
+    el.playsInline = true;
+    el.srcObject = stream;
+    Object.assign(el.style, {
+      position: 'fixed',
+      left: '-9999px',
+      width: '2px',
+      height: '2px',
+      opacity: '0',
+    });
+    document.body.append(el);
+    void el.play().catch(() => {});
+
+    const t0 = performance.now();
+    const rvfc = el.requestVideoFrameCallback?.bind(el);
+    const minGap = 1000 / (fps + 2);
+    let lastAt = 0;
+
+    const schedule = () => {
+      if (!running) return;
+      if (rvfc) rvfc(tick);
+      else requestAnimationFrame(tick);
+    };
+
+    const tick = () => {
+      if (!running) return;
+      // Alguns navegadores pausam ao trocar de aba; sem isso o laço morre em
+      // silêncio e a transmissão congela sem erro nenhum.
+      if (el.paused) void el.play().catch(() => {});
+      if (el.readyState < 2 || !el.videoWidth) return schedule();
+
+      const now = performance.now();
+      // rAF segue o refresh da tela, que pode estar bem acima do fps alvo.
+      if (!rvfc && now - lastAt < minGap) return schedule();
+      lastAt = now;
+
+      let frame: VideoFrame;
+      try {
+        frame = new VideoFrame(el, { timestamp: (now - t0) * 1000 });
+      } catch {
+        return schedule();
+      }
+      encodeFrame(frame);
+      schedule();
+    };
+
+    schedule();
+  }
+
+  function pump(track: MediaStreamTrack): void {
+    if ('MediaStreamTrackProcessor' in window) void pumpDirect(track);
+    else pumpViaVideo();
+  }
+
+  function cleanup(): void {
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+    video?.remove();
+    video = null;
+    stage = null;
+    stageCtx = null;
+  }
+
+  /**
+   * Encerra tudo (RN-TRX-32): intervalo de estatísticas, leitores, ambos os
+   * encoders, todas as tracks, o `<video>` auxiliar e o canvas de redimensão.
+   * Depois manda `stop` e fecha o socket.
+   */
+  function stop(reason?: string): void {
+    const wasRunning = running;
+    running = false;
+
+    if (statsTimer) clearInterval(statsTimer);
+    statsTimer = null;
+
+    void reader?.cancel().catch(() => {});
+    reader = null;
+    void audioReader?.cancel().catch(() => {});
+    audioReader = null;
+
+    for (const e of [encoder, audioEncoder]) {
+      if (e?.state === 'configured') {
+        try {
+          e.close();
+        } catch {
+          // já fechado
+        }
+      }
+    }
+    encoder = null;
+    audioEncoder = null;
+
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'stop' }));
+      ws.close();
+    }
+    ws = null;
+
+    cleanup();
+    if (wasRunning) onEnd?.(reason ?? '');
+  }
+
+  function connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(wsUrl);
+      ws = socket;
+      socket.binaryType = 'arraybuffer';
+
+      const timeout = setTimeout(() => {
+        socket.close();
+        reject(new Error('Não foi possível falar com o guild (timeout).'));
+      }, 10_000);
+
+      socket.addEventListener('open', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+
+      socket.addEventListener('message', (e) => {
+        if (typeof e.data !== 'string') return;
+        const msg = JSON.parse(e.data) as { type: string; slot?: number; viewers?: number; message?: string };
+
+        if (msg.type === 'slot') mySlot = msg.slot ?? 0;
+        else if (msg.type === 'state') viewers = msg.viewers ?? 0;
+        // Alguém entrou na sala e precisa de um ponto de partida (RN-TRX-20).
+        else if (msg.type === 'need-keyframe') wantKeyframe = true;
+        else if (msg.type === 'stop-request') stop('Transmissão encerrada pela atividade.');
+        else if (msg.type === 'error') {
+          if (running) stop(msg.message);
+          else {
+            clearTimeout(timeout);
+            reject(new Error(msg.message));
+          }
+        }
+      });
+
+      socket.addEventListener('error', () => {
+        clearTimeout(timeout);
+        reject(new Error('Falha ao conectar no guild.'));
+      });
+
+      socket.addEventListener('close', () => {
+        clearTimeout(timeout);
+        if (running) stop('Conexão com o guild caiu.');
+      });
+    });
+  }
+
+  /** A faixa preparada, esperando a confirmação da prévia. */
+  let preparada: MediaStreamTrack | null = null;
+
+  /**
+   * Capture e escolhe o codec, **sem abrir socket nem encoder** (RN-TRX-38).
+   *
+   * É aqui que a prévia se apoia: a pessoa ainda não está no ar, então trocar
+   * de tela ou resolver o som barrado não custa nada a ninguém (RN-TRX-37).
+   */
+  async function preparar(): Promise<Previa> {
+    // Precisa vir do gesto do usuário; qualquer await antes disso o invalida
+    // (RN-TRX-6).
+    const capturado = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: fps, max: fps } },
+      audio: audio ? audioConstraints() : false,
+    });
+    stream = capturado;
+
+    const track = capturado.getVideoTracks()[0];
+    if (!track) {
+      cleanup();
+      throw new Error('A captura veio sem imagem.');
+    }
+
+    // Diz ao encoder que o conteúdo é tela (texto/UI), não vídeo natural —
+    // preserva nitidez das bordas em vez de suavizar (RN-TRX-15).
+    track.contentHint = 'text';
+    track.addEventListener('ended', () => stop('Você parou o compartilhamento pelo navegador.'));
+
+    const s = track.getSettings();
+    const target = fitWithin(s.width ?? 1280, s.height ?? 720, maxHeight);
+
+    config = await pickConfig(target.width, target.height);
+    if (!config) {
+      cleanup();
+      throw new Error('Nenhum codec de vídeo suportado por este navegador.');
+    }
+
+    // O som é resolvido já na preparação: é o que permite oferecer "Som de uma
+    // aba" antes de alguém ver a tela errada (RN-TRX-37).
+    const faixaSom = prepararSom(track, capturado);
+    preparada = track;
+
+    return {
+      track,
+      width: target.width,
+      height: target.height,
+      hasSound: Boolean(faixaSom),
+      soundBlocked,
+    };
+  }
+
+  async function goLive(): Promise<MediaStream> {
+    const track = preparada;
+    const capturado = stream;
+    if (!track || !capturado || !config) throw new Error('Nada preparado para transmitir.');
+
+    await connect();
+
+    encoder = new VideoEncoder({
+      output: onEncoded,
+      error: (err) => stop(`Erro no encoder: ${err.message}`),
+    });
+    encoder.configure(config);
+
+    ws?.send(JSON.stringify({ type: 'start' }));
+
+    running = true;
+    wantKeyframe = true;
+    lastKeyframeAt = 0;
+    srcW = 0;
+    srcH = 0;
+    startedAt = Date.now();
+
+    onStatus?.({
+      codec: config.codec,
+      width: config.width,
+      height: config.height,
+      direct: 'MediaStreamTrackProcessor' in window,
+    });
+
+    statsTimer = setInterval(() => {
+      onStats?.({
+        viewers,
+        fps: frames,
+        mbps: (bytes * 8) / 1e6,
+        seconds: Math.floor((Date.now() - startedAt) / 1000),
+      });
+      bytes = 0;
+      frames = 0;
+    }, 1000);
+
+    pump(track);
+    // Pedir áudio não garante receber (RN-TRX-26): em vários sistemas a caixa
+    // "compartilhar o som" fica desmarcada e o navegador devolve a tela sem
+    // faixa de som. A faixa já foi decidida em preparar().
+    const audioTrack = capturado.getAudioTracks()[0];
+    if (audioTrack) void pumpAudio(audioTrack);
+
+    return capturado;
+  }
+
+  async function start(): Promise<MediaStream> {
+    await preparar();
+    return goLive();
+  }
+
+  /**
+   * Troca só a fonte do som, sem tocar no vídeo (RF-TRX-6).
+   *
+   * É o que torna som e tela inteira compatíveis: o vídeo continua sendo a tela
+   * escolhida e o som passa a vir de uma aba, que é isolada por construção.
+   */
+  async function trocarSom(): Promise<MediaStreamTrack> {
+    const escolha = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: audioConstraints(),
+    });
+
+    const faixa = escolha.getAudioTracks()[0];
+    const superficie = escolha.getVideoTracks()[0]?.getSettings().displaySurface;
+
+    // O vídeo desta escolha não interessa: viemos só pelo som.
+    escolha.getVideoTracks().forEach((t) => t.stop());
+
+    if (!faixa) {
+      escolha.getTracks().forEach((t) => t.stop());
+      throw new Error(
+        'Essa escolha veio sem som. Escolha uma aba e marque "Compartilhar o áudio da guia".'
+      );
+    }
+
+    if (superficie !== 'browser') {
+      faixa.stop();
+      throw new Error(
+        'Só aba tem som isolado. Screen inteira traria o Discord junto e a call se ouviria.'
+      );
+    }
+
+    // Encerra o laço anterior antes de abrir outro (RN-TRX-28), senão os dois
+    // alimentam o mesmo encoder e a fila estoura.
+    await audioReader?.cancel().catch(() => {});
+    audioReader = null;
+    if (audioEncoder?.state === 'configured') {
+      try {
+        audioEncoder.close();
+      } catch {
+        // já fechado
+      }
+    }
+    audioEncoder = null;
+
+    soundBlocked = false;
+    faixa.addEventListener('ended', () => onAviso?.('A aba do som foi fechada.'));
+    void pumpAudio(faixa);
+    return faixa;
+  }
+
+  /**
+   * Troca a tela compartilhada sem derrubar a transmissão (RF-TRX-8).
+   *
+   * A conexão, o encoder e o slot continuam os mesmos — quem assiste só vê a
+   * imagem mudar, sem piscar nem reconectar.
+   */
+  async function changeScreen(): Promise<MediaStream> {
+    const fresh = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: fps, max: fps } },
+      audio: audio ? audioConstraints() : false,
+    });
+
+    const previous = stream;
+    const previousReader = reader;
+
+    stream = fresh;
+    const track = fresh.getVideoTracks()[0];
+    if (!track) throw new Error('A captura veio sem imagem.');
+
+    track.contentHint = 'text';
+    track.addEventListener('ended', () => stop('Você parou o compartilhamento pelo navegador.'));
+
+    reader = null;
+    await previousReader?.cancel().catch(() => {});
+    previous?.getTracks().forEach((t) => t.stop());
+
+    // Zera o tamanho conhecido: a tela nova quase certamente tem outro, e é o
+    // syncSize que reconfigura o encoder.
+    srcW = 0;
+    srcH = 0;
+    wantKeyframe = true;
+
+    if (video) {
+      video.srcObject = fresh;
+      void video.play().catch(() => {});
+    } else {
+      void pumpDirect(track);
+    }
+
+    // A tela nova traz a própria faixa de som; a antiga morreu com o stream.
+    await audioReader?.cancel().catch(() => {});
+    audioReader = null;
+    const novoAudio = prepararSom(track, fresh);
+    if (novoAudio && audioEncoder) void pumpAudio(novoAudio);
+
+    return fresh;
+  }
+
+  /** Ajusta qualidade e taxa de quadros com a transmissão no ar (RF-TRX-7). */
+  function setQuality({
+    bitrate: nextBitrate,
+    fps: nextFps,
+    maxHeight: nextMax,
+  }: { bitrate?: number; fps?: number; maxHeight?: number } = {}): void {
+    if (nextBitrate) bitrate = nextBitrate;
+    if (nextFps) fps = nextFps;
+    if (nextMax) {
+      maxHeight = nextMax;
+      // Zera o tamanho conhecido para o syncSize refazer a conta com o teto novo.
+      srcW = 0;
+      srcH = 0;
+    }
+    if (encoder?.state !== 'configured' || !config) return;
+
+    config = { ...config, bitrate, framerate: fps };
+    encoder.configure(config);
+    wantKeyframe = true;
+
+    // Pedir a taxa nova à própria captura evita gastar CPU codificando quadros
+    // que seriam descartados adiante.
+    void stream
+      ?.getVideoTracks()[0]
+      ?.applyConstraints({ frameRate: { ideal: fps, max: fps } })
+      .catch(() => {});
+  }
+
+  if (onError) {
+    // O erro do pipeline chega por onEnd; onError fica para quem quiser separar
+    // falha de encerramento normal.
+  }
+
+  return {
+    preparar,
+    faixaPreparada: () => preparada,
+    goLive,
+    start,
+    stop,
+    changeScreen,
+    trocarSom,
+    setQuality,
+    getSettings: () => ({ bitrate, fps }),
+    hasSound: () => Boolean(audioEncoder),
+    soundBlocked: () => soundBlocked,
+    isRunning: () => running,
+  };
+}

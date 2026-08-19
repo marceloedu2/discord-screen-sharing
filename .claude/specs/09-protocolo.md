@@ -99,6 +99,7 @@ sockets mortos. Sem isso o contador de espectadores mente.
 | `unwatch` | `{ slot }` | Para de receber |
 | `rename` | `{ name }` | Troca o nome exibido |
 | `stop-broadcast` | — | Pede ao servidor que encerre **a própria** transmissão |
+| `leave` | — | Avisa que está saindo de propósito, e não caindo |
 
 **Servidor → clientes**
 
@@ -112,7 +113,15 @@ sockets mortos. Sem isso o contador de espectadores mente.
 | `need-keyframe` | — | ao transmissor, quando alguém começa a assistir |
 | `stop-request` | — | ao transmissor, pedido de parada vindo da Activity |
 | `room-gone` | — | a sala fechou entre o token e a conexão |
-| `error` | `{ message }` | recusa (limite de slots, já transmitindo) |
+| `error` | `{ message }` | recusa (limite de slots, já transmitindo, tela lotada) |
+| `dropped` | `{ slot }` | descarte por backpressure, ao espectador afetado |
+
+`RN-PRO-20` · novo · P2 — O `dropped` é a única adição ao protocolo herdado, e
+ela é de mão única: o servidor avisa, o cliente não responde. Existe porque sem
+ele o indicador de qualidade (`RF-AST-17`) não distingue rede de quem assiste de
+rede de quem transmite — que é justamente a pergunta que se faz nessa hora. Vai
+espaçado em 2 s por espectador: um aviso por quadro perdido seriam dezenas por
+segundo, no mesmo socket que já não dá conta.
 
 `RN-PRO-16` · herdado · P0 — `stop-broadcast` só encerra a transmissão **de quem
 pediu**, resolvida por `uid`. Ninguém derruba a tela de outra pessoa.
