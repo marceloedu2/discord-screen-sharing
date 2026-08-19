@@ -1,0 +1,32 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // NodeNext, não bundler: aqui não há empacotador nenhum. É o Node que
+    // resolve os imports, e ele exige a extensão no caminho — o compilador
+    // precisa cobrar a mesma coisa, senão o erro só aparece em execução.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2023",
+    "lib": ["es2023"],
+    "types": ["node"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "declaration": false,
+
+    // O `node --experimental-strip-types` do script de dev só remove
+    // anotações; ele não compila enum, namespace nem decorator. Ligar isto faz
+    // o compilador recusar o que o Node não saberia executar, em vez de deixar
+    // a diferença aparecer só no arranque.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    // Os imports carregam a extensão .ts porque é isso que o Node executa em
+    // desenvolvimento, sem passo de build. O par abaixo é o que faz os dois
+    // modos conviverem: o compilador aceita a extensão na entrada e a reescreve
+    // para .js na saída, então o `dist/` de produção continua importando .js.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"]
+}
