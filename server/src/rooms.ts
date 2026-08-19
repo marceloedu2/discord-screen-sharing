@@ -567,6 +567,23 @@ export function detachViewer(room: Room, ws: WebSocket): void {
   broadcastState(room);
 }
 
+/**
+ * Fecha a sala agora, se ela ficou vazia (RN-SAL-20a).
+ *
+ * A carência de 12 s existe para a **queda**: recarregar a atividade desconecta
+ * e reconecta, e sem ela quem estivesse sozinho perderia a sala a cada F5. Sair
+ * de propósito é outra coisa — ali não há reconexão a esperar, e deixar a sala
+ * de pé por mais 12 segundos só faz ela aparecer vazia na lista de quem está
+ * olhando o lobby naquele instante.
+ *
+ * Só quem sai é que chama isto. A queda continua passando pelo varredor.
+ */
+export function closeIfEmpty(room: Room): void {
+  if (room.viewers.size > 0 || room.broadcasters.size > 0) return;
+  rooms.delete(room.id);
+  console.log(`[room ${room.id}] fechada por quem saiu`);
+}
+
 export const stats = () =>
   [...rooms.values()].map((r) => ({
     id: r.id,

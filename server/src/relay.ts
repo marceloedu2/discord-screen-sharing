@@ -125,6 +125,9 @@ function handleBroadcaster(ws: WebSocket, room: Room, info: Person): void {
 function handleViewer(ws: WebSocket, room: Room, info: Person): void {
   rooms.attachViewer(room, ws, info);
 
+  /** Clicou em sair, e não simplesmente perdeu a conexão. */
+  let saiuDeProposito = false;
+
   ws.on('message', (data: RawData, isBinary: boolean) => {
     if (isBinary) return;
 
@@ -148,6 +151,14 @@ function handleViewer(ws: WebSocket, room: Room, info: Person): void {
       return;
     }
 
+    // Saiu de propósito. Marca a intenção antes de o socket fechar: é ela que
+    // separa "clicou em sair" de "a conexão caiu", e as duas pedem tratamentos
+    // opostos na hora de fechar a sala (RN-SAL-20a).
+    if (msg.type === 'leave') {
+      saiuDeProposito = true;
+      return;
+    }
+
     // Encerrar a própria transmissão de dentro da Activity, sem ter que achar
     // a aba de captura. Cada um só encerra a sua.
     if (msg.type === 'stop-broadcast') {
@@ -159,7 +170,12 @@ function handleViewer(ws: WebSocket, room: Room, info: Person): void {
     }
   });
 
-  ws.on('close', () => rooms.detachViewer(room, ws));
+  ws.on('close', () => {
+    rooms.detachViewer(room, ws);
+    // Última pessoa saindo por vontade própria: a sala vai embora agora. Quem
+    // caiu continua com a carência do varredor, que existe para o F5.
+    if (saiuDeProposito) rooms.closeIfEmpty(room);
+  });
   ws.on('error', () => rooms.detachViewer(room, ws));
 }
 

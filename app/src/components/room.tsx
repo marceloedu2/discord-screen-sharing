@@ -107,12 +107,15 @@ export function Room({ guild }: { guild?: string } = {}) {
    */
   const [loggedOut, setLoggedOut] = useState(false);
   /**
-   * A sala da call, resolvida mas ainda não aberta.
+   * A sala da call, resolvida e guardada — mas fora dela.
    *
-   * `/<id>` é a **tela de entrada**: ela diz em qual call você está e pergunta
-   * se quer abrir. A sala de fato é `/<id>?room=<sala>` — e é essa a URL que
-   * vai para o convite. Sem essa separação, sair da sala cairia de volta nela
-   * no mesmo instante, porque você continua na call.
+   * Abrir `/<id>` **entra direto**: quem chega pelo link quer a sala, e uma
+   * tela de confirmação no meio só custaria um clique.
+   *
+   * Ela aparece depois de sair, e é isso que impede o laço: você continua na
+   * call, então sem esse estado o arranque colocaria você de volta no mesmo
+   * instante. Os tokens ficam guardados aqui para reentrar sem consultar o
+   * Discord de novo.
    */
   const [entrada, setEntrada] = useState<RoomTokens | null>(null);
   const [slow, setSlow] = useState(false);
@@ -155,6 +158,15 @@ export function Room({ guild }: { guild?: string } = {}) {
     y: number;
   } | null>(null);
   const [tokens, setTokens] = useState<RoomTokens | null>(null);
+  /**
+   * Os mesmos tokens, numa ref.
+   *
+   * `leaveRoom` precisa deles, e lê-los do estado o fazia mudar de identidade a
+   * cada entrada e saída. Isso subia a cadeia — `connect`, `enterGuildRoom` — e
+   * chegava ao efeito de arranque, que rodava de novo e **reentrava na sala que
+   * a pessoa acabara de deixar**.
+   */
+  const tokensRef = useRef<RoomTokens | null>(null);
   const [broadcastModal, setBroadcastModal] = useState(false);
   // Transmissão nascida aqui dentro, quando o Discord permite capturar no
   // iframe. A que roda na aba externa tem conexão própria e não aparece aqui.
@@ -247,10 +259,15 @@ export function Room({ guild }: { guild?: string } = {}) {
     writeRoomInUrl(null);
     setTokens(null);
     setInRoom(false);
-    // Volta para a entrada do servidor com o que já foi resolvido: ninguém
-    // precisa consultar o Discord de novo para saber qual é a call.
-    if (guild) setEntrada((atual) => atual ?? tokens);
-  }, [connection, stopMyBroadcast, guild, tokens]);
+    // O valor é lido **agora**, e não dentro do atualizador: o atualizador roda
+    // depois, e a essa altura a ref já teria sido zerada — a tela de "você
+    // saiu" ficava sem os tokens e caía no painel de "abrindo a sala".
+    const ultimos = tokensRef.current;
+    tokensRef.current = null;
+    // Guarda o que já foi resolvido: voltar não precisa consultar o Discord de
+    // novo para saber qual é a call.
+    if (guild && ultimos) setEntrada((atual) => atual ?? ultimos);
+  }, [connection, stopMyBroadcast, guild]);
 
   /**
    * O ciclo entre entrar na call e conectar, quebrado.
@@ -266,6 +283,7 @@ export function Room({ guild }: { guild?: string } = {}) {
     (tokens: RoomTokens) => {
       saveTokens(tokens);
       writeRoomInUrl(tokens.roomId);
+      tokensRef.current = tokens;
       setTokens(tokens);
       setInRoom(true);
 
@@ -283,9 +301,10 @@ export function Room({ guild }: { guild?: string } = {}) {
         },
         onRoomGone: () => {
           forgetTokens(tokens.roomId);
-          // Na Activity a sala é a da call: ela é recriada e a atividade volta
-          // para ela. No site, quem some é a sala escolhida (RF-SAL-7).
-          if (inDiscord) {
+          // Onde a sala é a da call — Activity ou link de servidor — ela é
+          // recriada e a pessoa volta para ela (RF-SAL-7). Só no lobby é que
+          // "a sala sumiu" significa mesmo perder o lugar.
+          if (inDiscord || guild) {
             rejoinCall.current?.();
           } else {
             toast("A sala foi fechada.", true);
@@ -295,12 +314,12 @@ export function Room({ guild }: { guild?: string } = {}) {
         onRejected: () => {
           forgetTokens(tokens.roomId);
           toast("Sua sessão expirou. Entrando de novo…");
-          if (inDiscord) rejoinCall.current?.();
+          if (inDiscord || guild) rejoinCall.current?.();
           else leaveRoom();
         },
       });
     },
-    [connection, ws, inDiscord, toast, leaveRoom]
+    [connection, ws, inDiscord, guild, toast, leaveRoom]
   );
 
   /**
@@ -343,10 +362,7 @@ export function Room({ guild }: { guild?: string } = {}) {
         if (tokens.user) {
           setSession((atual) => (atual ? { ...atual, user: tokens.user as Person } : atual));
         }
-        // Com `?room=` no endereço, a pessoa já pediu para entrar — foi por um
-        // convite ou por um link salvo. Sem ele, mostra a entrada.
-        if (pedida) connect(tokens);
-        else setEntrada(tokens);
+        connect(tokens);
       } catch (err) {
         if (err instanceof ApiError && err.code === "outra-call") {
           setWrongCall(true);
@@ -368,6 +384,18 @@ export function Room({ guild }: { guild?: string } = {}) {
 
   // ------------------------------------------------------------- arranque
 
+  /**
+   * O arranque.
+   *
+   * As dependências abaixo são todas estáveis de propósito: se qualquer uma
+   * mudar de identidade, este efeito roda de novo — e rodar de novo significa
+   * **entrar na sala outra vez**, inclusive numa que a pessoa acabou de
+   * deixar. Foi esse o caminho do laço que os tokens em `useState` abriam.
+   *
+   * Uma trava de "já arranquei" não serve aqui: em desenvolvimento o React
+   * monta o efeito duas vezes, e a trava barraria a segunda passagem — a
+   * primeira já foi cancelada pelo `alive`, e a sessão nunca chegaria.
+   */
   useEffect(() => {
     let alive = true;
     const watchdog = setTimeout(() => alive && setSlow(true), DEMORA_MS);
@@ -652,12 +680,12 @@ export function Room({ guild }: { guild?: string } = {}) {
     return (
       <main className="grid h-dvh place-items-center p-respiro text-center">
         <div className="max-w-md">
-          <p className="text-[13px] text-suave">Você está nesta call</p>
+          <p className="text-[13px] text-suave">Você saiu da sala</p>
           <h1 className="mt-1 text-xl font-semibold text-texto">
             {entrada.roomName ?? "Sala da call"}
           </h1>
           <p className="mt-2 text-suave">
-            Quem entrar aqui vê as telas compartilhadas por quem está nessa call.
+            Você continua na call do Discord. Pode voltar quando quiser.
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Link
@@ -669,12 +697,17 @@ export function Room({ guild }: { guild?: string } = {}) {
             <button
               type="button"
               onClick={() => {
+                // Tokens novos, e não os guardados: se você era o último a
+                // sair, a sala foi dissolvida na hora (RN-SAL-20a) e o token
+                // antigo aponta para algo que não existe mais. Reentrar é o
+                // mesmo caminho de entrar — perguntar ao Discord onde você
+                // está.
                 setEntrada(null);
-                connect(entrada);
+                if (session) void enterGuildRoom(session.identity);
               }}
               className="rounded-full bg-acento px-5 py-2.5 text-[14px]/none font-medium text-white hover:bg-acento-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto"
             >
-              Entrar na sala
+              Voltar para a sala
             </button>
           </div>
         </div>

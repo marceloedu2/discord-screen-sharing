@@ -574,6 +574,12 @@ export class RoomConnection {
    * sozinha e o arranque precisam deixar exatamente o mesmo estado para trás.
    */
   disconnect(): void {
+    // Avisa **antes** de fechar: é isso que separa "clicou em sair" de "a
+    // conexão caiu" do lado do servidor. Quem sai de propósito dissolve a sala
+    // se for o último; quem cai ganha a carência de 12 s, que existe para o F5
+    // (RN-SAL-20a).
+    this.#send({ type: 'leave' });
+
     this.#tokens = null;
     if (this.#amostrador) clearInterval(this.#amostrador);
     this.#amostrador = null;

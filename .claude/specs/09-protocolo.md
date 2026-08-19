@@ -99,6 +99,7 @@ sockets mortos. Sem isso o contador de espectadores mente.
 | `unwatch` | `{ slot }` | Para de receber |
 | `rename` | `{ name }` | Troca o nome exibido |
 | `stop-broadcast` | — | Pede ao servidor que encerre **a própria** transmissão |
+| `leave` | — | Avisa que está saindo de propósito, e não caindo |
 
 **Servidor → clientes**
 
