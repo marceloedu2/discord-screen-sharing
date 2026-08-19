@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/**
+ * Paleta do Discord, herdada de discord-streaming (specs/02-identidade-visual.md).
+ * Não é uma paleta nova: a Activity roda dentro do cliente do Discord, e uma
+ * tela que destoa dali lê como site de terceiro invadindo a call.
+ */
+@theme {
+  --color-fundo: #000000;
+  --color-painel: #1e1f22;
+  --color-painel-fundo: #202225;
+  --color-tile: #2b2d31;
+  --color-tile-hover: #43454b;
+  --color-linha: #35373c;
+  --color-texto: #f2f3f5;
+  --color-suave: #b5bac1;
+  --color-acento: #5865f2;
+  --color-perigo: #f23f43;
+  --color-vivo: #23a55a;
+
+  /* gg sans é a fonte do Discord e não é carregada por nós: dentro da Activity
+     ela já está no cliente, e fora dele o fallback assume (RN-UI-2). */
+  --font-sans: "gg sans", "Segoe UI", system-ui, sans-serif;
+
+  --radius-tile: 8px;
+}
+
+/* Tema escuro é o único tema (RN-UI-1). */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-fundo);
+  color: var(--color-texto);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
