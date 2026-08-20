@@ -88,13 +88,15 @@ Com isso caem `RF-AST-3` e `RN-AST-11`/`RN-AST-12`, que descreviam o divisor e a
 largura guardada — não há mais largura a arrastar.
 
 `RN-AST-8b` · novo · P1 — **A miniatura é um retângulo 16:9 fixo**, e não a
-altura do que estiver dentro. É nela que a webcam entra quando existir, e câmera
-esmagada não tem conserto no CSS de quem assiste. Em 104px de altura o avatar
-cai para 40px e o selo do nome para 11px — o tamanho cheio encosta um no outro.
+altura do que estiver dentro. É nela que a câmera entra (`RF-CAM-1`, em
+`06-transmissao.md`), e câmera esmagada não tem conserto no CSS de quem
+assiste. Em 104px de altura o avatar cai para 40px e o selo do nome para 11px —
+o tamanho cheio encosta um no outro.
 
 `RN-AST-8c` · novo · P1 — **Os selos ficam sobre a imagem, no tile**, e não numa
-barra de página: qualidade e `AO VIVO` no canto superior direito, nome com ícone
-de monitor no inferior esquerdo, os dois em fundo translúcido com desfoque. O
+barra de página: qualidade e `AO VIVO` no canto superior direito, nome com
+ícone de monitor ou de câmera no inferior esquerdo — conforme a modalidade
+daquele quadro (`RF-CAM-1`) —, os dois em fundo translúcido com desfoque. O
 canto de cima à direita é o que menos carrega informação numa captura de tela.
 
 Dar a grade inteira à tela esconderia quem está junto, e é a call que se perde

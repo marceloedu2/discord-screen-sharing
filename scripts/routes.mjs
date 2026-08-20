@@ -27,7 +27,7 @@ export const ROUTES = [
           // "Criar sala" que fica atrás do modal, e o passo clica no botão
           // errado sem reclamar.
           ['find', 'role', 'button', 'click', '--name', 'Criar sala', '--exact'],
-          ['fill', '#nomeSala', 'Sala de teste'],
+          ['fill', '#roomName', 'Sala de teste'],
           ['find', 'role', 'button', 'click', '--name', 'Criar', '--exact'],
         ],
         // Entrou: o nome da sala passa a aparecer no dock.

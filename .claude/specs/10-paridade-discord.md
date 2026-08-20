@@ -2,8 +2,11 @@
 
 Levantamento do que a tela de transmissão do Discord tem hoje e este projeto
 não. O critério de entrada foi estreito de propósito: **só o que pertence à
-experiência de compartilhar e assistir tela**. Microfone, câmera, soundboard,
+experiência de compartilhar e assistir tela**. Microfone, soundboard,
 mensagens e Activities são o Discord em volta — não este produto.
+
+Câmera **entrou**, revertendo a exclusão original — ver "Por que entrou" em
+`06-transmissao.md`.
 
 Cada item traz o que existe lá, o que existe aqui e como fica.
 
@@ -347,7 +350,6 @@ como produto quebrado.
 | Recurso do Discord | Por quê não |
 |---|---|
 | Microfone, mudo, ensurdecer | Não há voz aqui — a call é do Discord, ao lado |
-| Câmera / vídeo de rosto | Produto diferente, banda diferente |
 | Soundboard | Depende de voz |
 | Supressão de ruído (Krisp) | É de microfone |
 | Níveis de Nitro | Não há níveis pagos |

@@ -69,8 +69,11 @@ iframe do Discord.
 
 ## WebSocket
 
-`GET /ws?t=<token>` — o upgrade valida o token e escolhe o papel por
-`payload.role`.
+`GET /ws?t=<token>&kind=<screen|camera>` — o upgrade valida o token e escolhe
+o papel por `payload.role`. `kind` só importa para transmissor (`RF-CAM-1`,
+`06-transmissao.md`) — qualquer valor que não seja `camera` vira `screen` — e
+tem que vir **na URL**, não numa mensagem: a checagem de duplicata e o slot
+acontecem na conexão, antes de `start` chegar (`RN-CAM-2`).
 
 `RN-PRO-14` · herdado · P0 — `maxPayload: 4 MB`. O relay repassa o buffer intacto
 para todos os espectadores, então um quadro gigante de um transmissor adulterado
@@ -99,7 +102,7 @@ sockets mortos. Sem isso o contador de espectadores mente.
 | `unwatch` | `{ slot }` | Para de receber |
 | `rewatch` | `{ slot }` | Pede keyframe + config de novo, para quem **já assiste** |
 | `rename` | `{ name }` | Troca o nome exibido |
-| `stop-broadcast` | — | Pede ao servidor que encerre **a própria** transmissão |
+| `stop-broadcast` | `{ kind }` | Pede ao servidor que encerre **a própria** transmissão daquela modalidade |
 | `leave` | — | Avisa que está saindo de propósito, e não caindo |
 
 **Servidor → clientes**
@@ -108,7 +111,7 @@ sockets mortos. Sem isso o contador de espectadores mente.
 |---|---|---|
 | `state` | sala, participantes, streams, quem assiste | qualquer mudança |
 | `slot` | `{ slot }` | ao transmissor, na conexão |
-| `stream-start` | `{ slot, userId }` | alguém entrou no ar |
+| `stream-start` | `{ slot, userId, kind }` | alguém entrou no ar |
 | `config` / `audio-config` | `{ slot, config }` | a quem assiste |
 | `stream-stop` | `{ slot }` | saiu do ar |
 | `need-keyframe` | — | ao transmissor, quando alguém começa a assistir |
@@ -134,8 +137,9 @@ transmissor (a cada 3 s), ou para sempre, se aquele também fosse descartado. O
 `rewatch` é idempotente e não mexe em `watching`: pode ser pedido quantas vezes
 precisar, sem reemitir o estado da sala.
 
-`RN-PRO-16` · herdado · P0 — `stop-broadcast` só encerra a transmissão **de quem
-pediu**, resolvida por `uid`. Ninguém derruba a tela de outra pessoa.
+`RN-PRO-16` · alterado · P0 — `stop-broadcast` só encerra a transmissão **de
+quem pediu**, resolvida por `uid` **e** `kind` (`RN-CAM-3`) — tela e câmera se
+encerram sem se afetar. Ninguém derruba a tela de outra pessoa.
 
 ### Quadros (binário)
 

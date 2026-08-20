@@ -94,6 +94,18 @@ export const Icon = {
       <path d="M8 21h8M12 17v4M4 3l16 16" />
     </svg>
   ),
+  Camera: () => (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2" y="6" width="14" height="12" rx="2" />
+      <path d="M16 10.5 22 7v10l-6-3.5" />
+    </svg>
+  ),
+  CameraOff: () => (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2" y="6" width="14" height="12" rx="2" />
+      <path d="M16 10.5 22 7v10l-6-3.5M4 3l16 16" />
+    </svg>
+  ),
   Sound: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 9v6h4l5 4V5L8 9H4z" />

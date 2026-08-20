@@ -33,16 +33,59 @@ enquanto a transmissão durar. Pode voltar ao Discord normalmente; só não fech
 
 ## Slots
 
-`RN-TRX-9` · herdado · P0 — Até **4 transmissores simultâneos** por sala. Cada
-um recebe um `slot` numérico (0–3), atribuído pelo servidor, que carimba no
-**primeiro byte de todo quadro**.
+`RN-TRX-9` · alterado · P0 — Até **4 transmissões simultâneas** por sala — o
+teto é de transmissões, não de pessoas: uma pessoa sozinha, com tela e câmera
+ligadas, já ocupa duas (`RF-CAM-1`). Cada transmissão recebe um `slot`
+numérico (0–3), atribuído pelo servidor, que carimba no **primeiro byte de
+todo quadro**.
 
 `RN-TRX-10` · herdado · P0 — O servidor **confere o slot carimbado** contra o
 slot da conexão, e descarta o que não bate. Sem isso, um cliente adulterado
 injetaria quadros no stream de outra pessoa.
 
-`RN-TRX-11` · herdado · P0 — A mesma pessoa **não transmite duas vezes** na
-mesma sala. A segunda tentativa recebe "Você já está transmitindo nesta sala."
+`RN-TRX-11` · alterado · P0 — A mesma pessoa **não transmite duas vezes na
+mesma modalidade**: duas telas, ou duas câmeras. Tela e câmera **não contam uma
+para a outra** (`RF-CAM-1`) — a checagem é por `${uid}:${kind}`, não por `uid`
+sozinho. A segunda tentativa na mesma modalidade recebe "Você já está
+compartilhando a tela nesta sala." ou "Sua câmera já está ligada nesta sala.".
+
+## Câmera
+
+`RF-CAM-1` · novo · P1 — **Tela e câmera são duas transmissões independentes e
+simultâneas**, não um alternar entre as duas. O menu tem os dois botões lado a
+lado; ligar a câmera com a tela já no ar soma um **segundo quadro**, com o selo
+de câmera no lugar do selo de monitor (`RN-AST-8c`). Cada uma para sem afetar a
+outra.
+
+`RF-CAM-2` · novo · P1 — Ligar a câmera pede `getUserMedia({ video: {
+facingMode: 'user', frameRate: {...} } })` em vez de `getDisplayMedia()` — sem
+seletor de janela, sem preset de qualidade para escolher antes (o clique já
+liga). O resto do cano é o mesmo: mesmo `VideoEncoder`, mesmo relay, mesmo
+`Screen` do lado de quem assiste.
+
+`RN-CAM-1` · novo · P1 — **Câmera nunca carrega áudio.** Diferente da tela
+(`RN-TRX-24`), não existe um "som do rosto" a isolar — a captura de câmera nem
+chama `prepareSound()`, então não há faixa para barrar nem painel de "trocar a
+origem do som" para mostrar. `hasSound` é sempre `false` numa transmissão de
+câmera.
+
+`RN-CAM-2` · novo · P1 — O protocolo carrega `kind` na **URL do WebSocket**
+(`?kind=camera`), não na mensagem `start`: a checagem de duplicata e a
+atribuição de slot têm que acontecer **na conexão**, antes de qualquer
+mensagem chegar — chegando em `start` seria tarde demais para recusar direito
+(`RN-TRX-10`, `RN-TRX-11`).
+
+`RN-CAM-3` · novo · P1 — Parar é por modalidade: `stop-broadcast` carrega
+`kind`, e o servidor resolve **qual das duas** transmissões daquela pessoa
+encerrar (`RN-TRX-31`). Sair da sala encerra as duas, uma de cada vez.
+
+### Por que entrou
+
+`10-paridade-discord.md` listava câmera como "produto diferente, banda
+diferente" e a deixava fora. A decisão foi revista: o pedido concreto era supor
+os dois quadrados simultâneos — tela e rosto lado a lado, como o Discord faz —
+e nada na arquitetura de slot/relay/encoder impede isso. O custo real foi só
+trocar a chave do mapa de transmissores de `uid` para `uid:kind`.
 
 ## Codificação
 

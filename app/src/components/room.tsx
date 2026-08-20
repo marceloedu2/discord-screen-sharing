@@ -174,7 +174,11 @@ export function Room({ guild }: { guild?: string } = {}) {
   // A instância fica na ref e o "estou no ar" num estado à parte: ler a ref
   // durante a renderização é o que o compilador do React proíbe, e o botão
   // precisa do valor justamente ali.
-  const mine = useRef<Broadcaster | null>(null);
+  // Tela e câmera são duas transmissões independentes (RF-CAM-3): cada uma
+  // tem sua própria captura, sua própria opinião local de "estou no ar" e sua
+  // própria mensagem de parada — nunca uma reação em cadeia entre as duas.
+  const mineScreen = useRef<Broadcaster | null>(null);
+  const mineCamera = useRef<Broadcaster | null>(null);
   /**
    * A intenção local sobre estar no ar: `null` = sem opinião, vale o servidor.
    *
@@ -189,7 +193,8 @@ export function Room({ guild }: { guild?: string } = {}) {
    * A opinião local vence enquanto existe, e é descartada ao começar uma
    * transmissão nova — que é quando ela pode ter envelhecido.
    */
-  const [onAirIntent, setOnAirIntent] = useState<boolean | null>(null);
+  const [screenOnAirIntent, setScreenOnAirIntent] = useState<boolean | null>(null);
+  const [cameraOnAirIntent, setCameraOnAirIntent] = useState<boolean | null>(null);
   // Para onde o botão de silenciar volta: sem isto, desmutar cairia sempre em
   // 100%, ignorando o ajuste que a pessoa tinha feito (RN-AUD-12).
   const volumeBeforeMute = useRef(1);
@@ -250,14 +255,19 @@ export function Room({ guild }: { guild?: string } = {}) {
    * não sobra por onde avisar. Deixar a captura viva depois de sair é vazamento
    * de tela, não detalhe de interface.
    */
-  const stopMyBroadcast = useCallback(() => {
-    mine.current?.stop();
-    mine.current = null;
-    setOnAirIntent(false);
-    // A aba externa tem conexão própria: só o servidor consegue mandá-la parar
-    // (RN-TRX-31), e ele encerra a de quem pediu, resolvida por uid (RN-PRO-16).
-    connection.requestStop();
-  }, [connection]);
+  const stopMyBroadcast = useCallback(
+    (kind: "screen" | "camera") => {
+      const mine = kind === "camera" ? mineCamera : mineScreen;
+      mine.current?.stop();
+      mine.current = null;
+      (kind === "camera" ? setCameraOnAirIntent : setScreenOnAirIntent)(false);
+      // A aba externa tem conexão própria: só o servidor consegue mandá-la
+      // parar (RN-TRX-31), e ele encerra a de quem pediu, resolvida por uid e
+      // por kind — tela e câmera se encerram sem se afetar (RF-CAM-3).
+      connection.requestStop(kind);
+    },
+    [connection]
+  );
 
   /**
    * Sai da sala e volta para a raiz certa.
@@ -268,7 +278,8 @@ export function Room({ guild }: { guild?: string } = {}) {
    * deixava a pessoa numa tela que não era nem sala nem entrada.
    */
   const leaveRoom = useCallback(() => {
-    stopMyBroadcast();
+    stopMyBroadcast("screen");
+    stopMyBroadcast("camera");
     connection.disconnect();
     writeRoomInUrl(null);
     setTokens(null);
@@ -643,20 +654,32 @@ export function Room({ guild }: { guild?: string } = {}) {
   const onStage = room.streams[0]
     ? (room.participants.find((p) => p.id === room.streams[0]?.userId) ?? null)
     : null;
+  // Tela e câmera têm o mesmo palco (RF-CAM-1): o cabeçalho precisa dizer
+  // qual das duas está ali, e não sempre "tela".
+  const onStageKind = room.streams[0]?.kind ?? "screen";
 
-  const iAmOnAir =
-    onAirIntent ?? room.participants.some((p) => p.broadcasting && p.id === session?.user.id);
+  // A verdade do servidor já distingue por kind (RF-CAM-3): cada entrada de
+  // `room.streams` é uma transmissão, e a minha aparece com o meu uid uma vez
+  // para tela e, se estiver ligada, outra vez para câmera.
+  const iAmOnAirScreen =
+    screenOnAirIntent ??
+    room.streams.some((s) => s.kind === "screen" && s.userId === session?.user.id);
+  const iAmOnAirCamera =
+    cameraOnAirIntent ??
+    room.streams.some((s) => s.kind === "camera" && s.userId === session?.user.id);
 
-  async function share(preset: typeof DEFAULT_PRESET) {
+  async function share(preset: typeof DEFAULT_PRESET, source: "screen" | "camera" = "screen") {
     setBroadcastModal(false);
     if (!tokens) return;
+    const mine = source === "camera" ? mineCamera : mineScreen;
+    const setIntent = source === "camera" ? setCameraOnAirIntent : setScreenOnAirIntent;
     // Opinião velha ("acabei de parar") não pode sobreviver a um começo novo.
-    setOnAirIntent(null);
+    setIntent(null);
 
-    const r = await startBroadcast(tokens, preset, ws, {
+    const r = await startBroadcast(tokens, preset, source, ws, {
       onEnd: (reason) => {
         mine.current = null;
-        setOnAirIntent(false);
+        setIntent(false);
         if (reason) toast(reason);
       },
       onNotice: (m) => toast(m),
@@ -664,7 +687,7 @@ export function Room({ guild }: { guild?: string } = {}) {
 
     if (r.kind === "iframe") {
       mine.current = r.broadcaster;
-      setOnAirIntent(true);
+      setIntent(true);
     }
     else if (r.kind === "tab") toast("Abri a aba de captura. Deixe-a aberta enquanto transmite.");
     else if (r.kind === "refused") toast(r.message, true);
@@ -952,7 +975,9 @@ export function Room({ guild }: { guild?: string } = {}) {
                   avatar={onStage.avatar}
                   className="w-5! text-[9px]!"
                 />
-                <span className="truncate text-suave">Screen de {onStage.name}</span>
+                <span className="truncate text-suave">
+                  {onStageKind === "camera" ? "Câmera" : "Tela"} de {onStage.name}
+                </span>
               </>
             ) : null}
           </span>
@@ -961,11 +986,13 @@ export function Room({ guild }: { guild?: string } = {}) {
         <span className="flex-1" />
 
         {/* O chip de qualidade e o selo de no ar, como no Discord. */}
-        {iAmOnAir ? (
+        {iAmOnAirScreen || iAmOnAirCamera ? (
           <>
-            <span className="rounded bg-tile px-2 py-1 text-[11px] font-semibold tracking-wide text-texto">
-              {DEFAULT_PRESET.summary.replace(" · ", " ").toUpperCase()}
-            </span>
+            {iAmOnAirScreen ? (
+              <span className="rounded bg-tile px-2 py-1 text-[11px] font-semibold tracking-wide text-texto">
+                {DEFAULT_PRESET.summary.replace(" · ", " ").toUpperCase()}
+              </span>
+            ) : null}
             <span className="rounded bg-perigo px-2 py-1 text-[11px] font-semibold tracking-wide text-white">
               AO VIVO
             </span>
@@ -1057,7 +1084,7 @@ export function Room({ guild }: { guild?: string } = {}) {
         {broadcastModal ? (
           <BroadcastModal
             onClose={() => setBroadcastModal(false)}
-            onConfirm={(preset) => void share(preset)}
+            onConfirm={(preset) => void share(preset, "screen")}
           />
         ) : null}
 
@@ -1125,11 +1152,23 @@ export function Room({ guild }: { guild?: string } = {}) {
             <ControlBar>
               <Group>
                 <RoundButton
-                  label={iAmOnAir ? "Parar de transmitir" : "Compartilhar tela"}
-                  state={iAmOnAir ? "active" : "neutral"}
-                  onClick={() => (iAmOnAir ? stopMyBroadcast() : setBroadcastModal(true))}
+                  label={iAmOnAirScreen ? "Parar de transmitir" : "Compartilhar tela"}
+                  state={iAmOnAirScreen ? "active" : "neutral"}
+                  onClick={() => (iAmOnAirScreen ? stopMyBroadcast("screen") : setBroadcastModal(true))}
                 >
-                  {iAmOnAir ? <Icon.Stop /> : <Icon.Screen />}
+                  {iAmOnAirScreen ? <Icon.Stop /> : <Icon.Screen />}
+                </RoundButton>
+
+                {/* Independente da tela (RF-CAM-1): as duas ligam e desligam
+                    sem se afetar, e dá para as duas estarem no ar juntas. */}
+                <RoundButton
+                  label={iAmOnAirCamera ? "Desligar câmera" : "Ligar câmera"}
+                  state={iAmOnAirCamera ? "active" : "neutral"}
+                  onClick={() =>
+                    iAmOnAirCamera ? stopMyBroadcast("camera") : void share(DEFAULT_PRESET, "camera")
+                  }
+                >
+                  {iAmOnAirCamera ? <Icon.CameraOff /> : <Icon.Camera />}
                 </RoundButton>
 
                 {/* Só existe quando há som para controlar (RN-AUD-14). */}

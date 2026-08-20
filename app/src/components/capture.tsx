@@ -384,22 +384,27 @@ export function Capture() {
                 Vale na hora, sem derrubar quem está assistindo.
               </p>
 
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void swapScreen()}>Trocar de tela</Button>
-                {soundBlocked || hasSound ? null : (
-                  <Button onClick={() => void tabSound()}>Som de uma aba/janela</Button>
-                )}
-                {audioInputOpen ? null : (
-                  <Button onClick={() => void openAudioInputs()}>App fora do navegador</Button>
-                )}
-              </div>
+              {/* Câmera não carrega áudio (RF-CAM-1): sem faixa de som para
+                  trocar, não há "de uma aba/janela" nem "app fora do
+                  navegador" para oferecer aqui. */}
+              {isCamera ? null : (
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => void swapScreen()}>Trocar de tela</Button>
+                  {soundBlocked || hasSound ? null : (
+                    <Button onClick={() => void tabSound()}>Som de uma aba/janela</Button>
+                  )}
+                  {audioInputOpen ? null : (
+                    <Button onClick={() => void openAudioInputs()}>App fora do navegador</Button>
+                  )}
+                </div>
+              )}
 
               {/* Nenhuma API web isola o som de um app fora do navegador
                   (RN-TRX-24b) — nem `windowAudio`, que só alcança o que o
                   próprio navegador está tocando. Um cabo de áudio virtual
                   resolve fora da web: o app manda o som para lá, e o cabo
                   aparece aqui como um microfone comum. */}
-              {audioInputOpen ? (
+              {!isCamera && audioInputOpen ? (
                 <div className="flex flex-col gap-2 rounded-lg border border-linha bg-painel-fundo px-3 py-3">
                   <p className="text-[13px] text-suave">
                     Para o som de um jogo ou app instalado, instale um cabo de áudio virtual —{" "}
