@@ -13,19 +13,19 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
  * stroke-width 1.8, que é o que casa com o conjunto do Discord (RN-UI-3) —
  * nada de biblioteca de ícones preenchidos.
  */
-type Variante = "neutro" | "primario" | "encerrar" | "atencao";
+type Variant = "neutral" | "primary" | "end" | "warning";
 
-const VARIANTES: Record<Variante, string> = {
+const VARIANTS: Record<Variant, string> = {
   // Padrão do dock.
-  neutro: "bg-tile hover:not-disabled:bg-tile-hover",
+  neutral: "bg-tile hover:not-disabled:bg-tile-hover",
   // Ação principal disponível (`.btn.go`).
-  primario: "bg-acento text-white hover:not-disabled:bg-acento-hover",
+  primary: "bg-acento text-white hover:not-disabled:bg-acento-hover",
   // Você está transmitindo, ou está saindo (`.btn.live`, `.btn.leave`). Vermelho
   // e por último, como o encerrar chamada do Discord.
-  encerrar: "bg-perigo text-white hover:not-disabled:bg-perigo-hover",
+  end: "bg-perigo text-white hover:not-disabled:bg-perigo-hover",
   // Algo pedido não pôde ser feito e a saída está atrás deste botão. Amarelo,
   // não vermelho: é um convite a clicar, não um erro (RF-TRX-5).
-  atencao: "bg-atencao text-[#111214] hover:not-disabled:bg-atencao-hover",
+  warning: "bg-atencao text-[#111214] hover:not-disabled:bg-atencao-hover",
 };
 
 const BASE = [
@@ -40,13 +40,13 @@ const BASE = [
 ].join(" ");
 
 export function Button({
-  variant = "neutro",
+  variant = "neutral",
   wide = false,
   className = "",
   children,
-  ...resto
+  ...rest
 }: {
-  variant?: Variante;
+  variant?: Variant;
   /** `.btn.wide` — respiro maior nas laterais quando o rótulo é longo. */
   wide?: boolean;
   children?: ReactNode;
@@ -54,8 +54,8 @@ export function Button({
   return (
     <button
       type="button"
-      className={`${BASE} ${VARIANTES[variant]} ${wide ? "px-5" : "px-[14px]"} ${className}`}
-      {...resto}
+      className={`${BASE} ${VARIANTS[variant]} ${wide ? "px-5" : "px-[14px]"} ${className}`}
+      {...rest}
     >
       {children}
     </button>

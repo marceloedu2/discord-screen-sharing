@@ -16,10 +16,10 @@
  */
 
 /** Colchão contra o solavanco da rede (RN-AUD-2). */
-const COLCHAO = 0.08;
+const CUSHION = 0.08;
 
 /** Teto do atraso acumulado: passando disso, corta e volta ao vivo (RN-AUD-3). */
-const ATRASO_MAXIMO = COLCHAO * 4;
+const MAX_DELAY = CUSHION * 4;
 
 export interface RawAudioConfig {
   codec: string;
@@ -40,39 +40,39 @@ export function createAudio(
 ): AudioPlayer {
   let ctx: AudioContext | null = null;
   let decoder: AudioDecoder | null = null;
-  let ganho: GainNode | null = null;
-  let proximo = 0;
-  let nivel = volume;
-  let tocou = false;
+  let gain: GainNode | null = null;
+  let next = 0;
+  let level = volume;
+  let played = false;
 
-  function agendar(data: AudioData): void {
-    if (!ctx || !ganho) {
+  function schedule(data: AudioData): void {
+    if (!ctx || !gain) {
       data.close();
       return;
     }
 
-    const canais = data.numberOfChannels;
-    const buffer = ctx.createBuffer(canais, data.numberOfFrames, data.sampleRate);
-    for (let c = 0; c < canais; c++) {
+    const channels = data.numberOfChannels;
+    const buffer = ctx.createBuffer(channels, data.numberOfFrames, data.sampleRate);
+    for (let c = 0; c < channels; c++) {
       data.copyTo(buffer.getChannelData(c), { planeIndex: c, format: 'f32-planar' });
     }
     data.close();
 
-    const agora = ctx.currentTime;
+    const now = ctx.currentTime;
 
     // Fila secou (a rede engasgou): recomeça do presente. Agendar no passado não
     // atrasa a reprodução — o navegador simplesmente descarta o trecho.
-    if (proximo < agora + 0.005) proximo = agora + COLCHAO;
+    if (next < now + 0.005) next = now + CUSHION;
     // Fila cresceu demais: atraso acumulado não se recupera sozinho, e arrastar
     // o som cada vez mais para trás da imagem é pior que um corte.
-    else if (proximo - agora > ATRASO_MAXIMO) proximo = agora + COLCHAO;
+    else if (next - now > MAX_DELAY) next = now + CUSHION;
 
-    const fonte = ctx.createBufferSource();
-    fonte.buffer = buffer;
-    fonte.connect(ganho);
-    fonte.start(proximo);
-    proximo += buffer.duration;
-    tocou = true;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(gain);
+    source.start(next);
+    next += buffer.duration;
+    played = true;
 
     // O navegador pode ter criado o contexto suspenso; assistir foi um clique,
     // então retomar aqui é legítimo e não esbarra na política de autoplay.
@@ -91,9 +91,9 @@ export function createAudio(
 
     void ctx?.close().catch(() => {});
     ctx = null;
-    ganho = null;
-    proximo = 0;
-    tocou = false;
+    gain = null;
+    next = 0;
+    played = false;
   }
 
   function start(config: RawAudioConfig): boolean {
@@ -107,12 +107,12 @@ export function createAudio(
     // sampleRate igual ao da origem (RN-AUD-6): deixar o navegador reamostrar
     // acrescenta latência e artefato sem ganho nenhum.
     ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: config.sampleRate });
-    ganho = ctx.createGain();
-    ganho.gain.value = nivel;
-    ganho.connect(ctx.destination);
+    gain = ctx.createGain();
+    gain.gain.value = level;
+    gain.connect(ctx.destination);
 
     decoder = new AudioDecoder({
-      output: agendar,
+      output: schedule,
       // Pacote corrompido é um estalo, não o fim da transmissão: o próximo se
       // decodifica sozinho, então não há o que reiniciar (RN-AUD-7).
       error: (err) => console.warn('[audio]', err.message),
@@ -130,8 +130,8 @@ export function createAudio(
       return false;
     }
 
-    proximo = 0;
-    tocou = false;
+    next = 0;
+    played = false;
     return true;
   }
 
@@ -158,11 +158,11 @@ export function createAudio(
    * e acima de 1 amplifica, para socorrer quem capturou o som muito baixo.
    */
   function setVolume(value: number): void {
-    nivel = Math.min(2, Math.max(0, value));
+    level = Math.min(2, Math.max(0, value));
     // Rampa curta em vez de salto: mudar o ganho de um instante para o outro
     // produz um clique audível, que é justamente o que se quer evitar.
-    if (ganho) ganho.gain.setTargetAtTime(nivel, ganho.context.currentTime, 0.02);
+    if (gain) gain.gain.setTargetAtTime(level, gain.context.currentTime, 0.02);
   }
 
-  return { start, push, stop, setVolume, hasSound: () => tocou };
+  return { start, push, stop, setVolume, hasSound: () => played };
 }

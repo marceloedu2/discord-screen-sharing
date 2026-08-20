@@ -20,7 +20,7 @@
 const ID = /^[0-9]{15,21}$/;
 const HASH = /^(a_)?[0-9a-f]{32}$/;
 
-const UM_DIA = 86_400;
+const ONE_DAY = 86_400;
 
 export async function GET(
   _req: Request,
@@ -33,7 +33,7 @@ export async function GET(
     const upstream = await fetch(`https://cdn.discordapp.com/avatars/${id}/${hash}.png?size=128`, {
       // O CDN fora do ar não pode virar uma sala que não abre.
       signal: AbortSignal.timeout(5000),
-      next: { revalidate: UM_DIA },
+      next: { revalidate: ONE_DAY },
     });
     if (!upstream.ok) return new Response(null, { status: 404 });
 
@@ -43,7 +43,7 @@ export async function GET(
         // (RN-PRO-10).
         "Content-Type": "image/png",
         // O hash muda quando a pessoa troca a foto, então a URL é imutável.
-        "Cache-Control": `public, max-age=${UM_DIA}, immutable`,
+        "Cache-Control": `public, max-age=${ONE_DAY}, immutable`,
       },
     });
   } catch {

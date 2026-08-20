@@ -20,9 +20,9 @@ import type { Session } from './types';
  * (RN-TRX-8): `window.open` dentro do iframe do Discord não chega a lugar
  * nenhum. Uma instância só, criada no login e reusada.
  */
-let sdkAtivo: DiscordSDK | null = null;
+let activeSdk: DiscordSDK | null = null;
 
-export const sdk = () => sdkAtivo;
+export const sdk = () => activeSdk;
 
 /** Onde o apelido escolhido pela pessoa vive (RN-SES-13). */
 export const STORED_NAME = 'displayName';
@@ -46,8 +46,8 @@ export function takeIdentityFromHash(): string | null {
   if (!identity) return null;
 
   hash.delete('identity');
-  const resto = hash.toString();
-  history.replaceState(null, '', `${location.pathname}${location.search}${resto ? `#${resto}` : ''}`);
+  const rest = hash.toString();
+  history.replaceState(null, '', `${location.pathname}${location.search}${rest ? `#${rest}` : ''}`);
 
   save(identity);
   return identity;
@@ -99,11 +99,11 @@ export async function authDiscord(
   clientId: string,
   api: (path: string) => string
 ): Promise<Session> {
-  const instancia = new DiscordSDK(clientId);
-  sdkAtivo = instancia;
-  await instancia.ready();
+  const instance = new DiscordSDK(clientId);
+  activeSdk = instance;
+  await instance.ready();
 
-  const { code } = await instancia.commands.authorize({
+  const { code } = await instance.commands.authorize({
     client_id: clientId,
     response_type: 'code',
     state: '',
@@ -117,15 +117,15 @@ export async function authDiscord(
     code,
     client_id: clientId,
   });
-  await instancia.commands.authenticate({ access_token });
+  await instance.commands.authenticate({ access_token });
 
   // servidor/channel vão junto para o servidor poder confirmar, pelo Discord, que
   // a pessoa está mesmo naquela call (RF-SES-2).
   return post<Session>(api('/api/session'), {
     access_token,
-    instance_id: instancia.instanceId,
-    guild_id: instancia.guildId,
-    channel_id: instancia.channelId,
+    instance_id: instance.instanceId,
+    guild_id: instance.guildId,
+    channel_id: instance.channelId,
   });
 }
 
@@ -136,7 +136,7 @@ export async function authDiscord(
  * (RN-SES-4). Nenhum dos dois custa uma ida à rede.
  */
 export function clientIdOf(params: URLSearchParams): string | null {
-  return params.get('client_id') || window.__SALA__?.clientId || null;
+  return params.get('client_id') || window.__ROOM__?.clientId || null;
 }
 
 /**

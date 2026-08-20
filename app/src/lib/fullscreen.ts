@@ -12,7 +12,7 @@
  */
 
 /** @returns true se a API nativa assumiu; false quando resta o layout. */
-export async function enterRoom(): Promise<boolean> {
+export async function enterNative(): Promise<boolean> {
   if (!document.documentElement.requestFullscreen) return false;
   try {
     await document.documentElement.requestFullscreen();
@@ -22,7 +22,7 @@ export async function enterRoom(): Promise<boolean> {
   }
 }
 
-export async function sair(): Promise<boolean> {
+export async function exitNative(): Promise<boolean> {
   if (!document.fullscreenElement) return false;
   try {
     await document.exitFullscreen();
@@ -32,10 +32,10 @@ export async function sair(): Promise<boolean> {
   }
 }
 
-export const nativaAtiva = () => Boolean(document.fullscreenElement);
+export const nativeActive = () => Boolean(document.fullscreenElement);
 
 /** Avisa quando o navegador entra ou sai por conta própria — o `Esc`, por exemplo. */
-export function ouvir(aoMudar: () => void): () => void {
-  document.addEventListener('fullscreenchange', aoMudar);
-  return () => document.removeEventListener('fullscreenchange', aoMudar);
+export function listen(onChange: () => void): () => void {
+  document.addEventListener('fullscreenchange', onChange);
+  return () => document.removeEventListener('fullscreenchange', onChange);
 }

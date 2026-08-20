@@ -238,9 +238,9 @@ const guildRoom: Handler = async (ctx) => {
     return fail(ctx.res, 401, 'Entre com o Discord para usar o link do servidor.');
   }
 
-  const voz = await discord.voiceChannelOf(guildId, me.uid);
+  const voice = await discord.voiceChannelOf(guildId, me.uid);
 
-  if (voz.tipo === 'indeterminado') {
+  if (voice.type === 'unknown') {
     return fail(
       ctx.res,
       503,
@@ -248,16 +248,16 @@ const guildRoom: Handler = async (ctx) => {
         'ou dê a ele permissão de ver o seu canal de voz.'
     );
   }
-  if (voz.tipo === 'fora') {
+  if (voice.type === 'out') {
     return fail(ctx.res, 403, 'Você não está em nenhuma call deste servidor. Entre num canal de voz e tente de novo.');
   }
 
-  const daMinhaCall = `call-${voz.canal}`;
-  const pedida = str(ctx.body.room);
+  const myCallRoom = `call-${voice.channel}`;
+  const requested = str(ctx.body.room);
 
   // Veio um link de convite apontando para outra call. Recusar é o ponto:
   // quem autoriza é estar lá, não ter o endereço.
-  if (pedida && pedida !== daMinhaCall) {
+  if (requested && requested !== myCallRoom) {
     // O `code` deixa o cliente distinguir esta recusa das outras: aqui a pessoa
     // **está** numa call, só que noutra — então cabe oferecer a dela, em vez de
     // pedir que entre em alguma.
@@ -274,14 +274,14 @@ const guildRoom: Handler = async (ctx) => {
   //
   // O nome vem do próprio canal — "Categoria / Canal" — para a pessoa
   // reconhecer de qual call se trata sem precisar decorar id nenhum.
-  const name = await discord.channelName(guildId, voz.canal);
-  const room = rooms.ensureCallRoom(`guild-${guildId}`, daMinhaCall, name);
+  const name = await discord.channelName(guildId, voice.channel);
+  const room = rooms.ensureCallRoom(`guild-${guildId}`, myCallRoom, name);
 
   // Como a pessoa se chama **neste servidor**. Se ela já escolheu um apelido
   // no produto, ele manda: é escolha dela, e sobrescrevê-la a cada entrada
   // faria o nome voltar sozinho (RN-SES-13).
-  const noServidor = await discord.memberName(guildId, me.uid);
-  const eu: Claims = noServidor ? { ...me, name: noServidor } : me;
+  const guildNickname = await discord.memberName(guildId, me.uid);
+  const eu: Claims = guildNickname ? { ...me, name: guildNickname } : me;
 
   json(ctx.res, 200, {
     ...roomTokens(room.id, eu),
@@ -364,10 +364,10 @@ const password: Handler = (ctx) => {
  * `/auth/login?goBack=https://outro.site` e o Discord devolve a pessoa lá,
  * carimbada de "veio do login do Discord".
  */
-function destinoSeguro(bruto: string | null): string {
-  if (!bruto) return '/';
+function safeRedirect(raw: string | null): string {
+  if (!raw) return '/';
   // Só a raiz ou /<id de servidor>. Nada de "//" nem de esquema.
-  return /^\/[0-9]{0,21}$/.test(bruto) ? bruto : '/';
+  return /^\/[0-9]{0,21}$/.test(raw) ? raw : '/';
 }
 
 const login: Handler = ({ res, query }) => {
@@ -376,20 +376,20 @@ const login: Handler = ({ res, query }) => {
 
   // Para onde voltar depois. Vai no `state` do OAuth, que é o campo que existe
   // exatamente para isto e volta intacto no callback.
-  const alvo = new URL(url);
-  alvo.searchParams.set('state', destinoSeguro(query.get('goBack')));
-  redirect(res, alvo.toString());
+  const target = new URL(url);
+  target.searchParams.set('state', safeRedirect(query.get('goBack')));
+  redirect(res, target.toString());
 };
 
 const callback: Handler = async ({ res, query }) => {
   const code = query.get('code');
-  if (!code) return redirect(res, '/?erro=sem_codigo');
+  if (!code) return redirect(res, '/?error=missing_code');
 
   const accessToken = await discord.exchangeCode(code, REDIRECT_URI);
-  if (!accessToken) return redirect(res, '/?erro=troca_falhou');
+  if (!accessToken) return redirect(res, '/?error=exchange_failed');
 
   const me = await discord.profileOf(accessToken);
-  if (!me) return redirect(res, '/?erro=perfil_falhou');
+  if (!me) return redirect(res, '/?error=profile_failed');
 
   // 30 dias, como o crachá de convidado. Com 8 horas a pessoa reencontrava a
   // tela de consentimento do Discord quase todo dia, e autorizar de novo o que
@@ -398,11 +398,11 @@ const callback: Handler = async ({ res, query }) => {
 
   // O `state` volta intacto do Discord, mas ele passou por fora — então é
   // conferido de novo aqui, não só na ida.
-  const volta = destinoSeguro(query.get('state'));
+  const back = safeRedirect(query.get('state'));
 
   // No fragmento, não na query: o fragmento não é enviado ao servidor nem
   // aparece em log de proxy. O cliente lê e limpa da barra de endereço.
-  redirect(res, `${volta}#identity=${encodeURIComponent(identity)}`);
+  redirect(res, `${back}#identity=${encodeURIComponent(identity)}`);
 };
 
 // -------------------------------------------------------------------- tabela

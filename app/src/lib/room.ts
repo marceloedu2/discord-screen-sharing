@@ -4,6 +4,15 @@ import { read, store } from './storage';
 import type { Person, RoomState, RoomTokens, ServerMessage, StreamState } from './types';
 
 /**
+ * Sem quadro há mais tempo que isto, com descarte em andamento, é travamento
+ * (RF-AST-18a) — não uma rajada passageira. O servidor já avisa a cada 2 s
+ * (`DROP_NOTICE_MS`, em server/src/rooms.ts); dar uma folga curta em cima
+ * evita pedir de novo por causa de uma única perda isolada que o próximo
+ * delta já resolveria sozinho.
+ */
+const STALL_MS = 1200;
+
+/**
  * A conexão com a sala, fora do React.
  *
  * O estado da sala muda a cada `state` do servidor, e a grade é reconstruída
@@ -26,12 +35,12 @@ export interface RoomSnapshot {
   /** Slots que já desenharam um quadro — até lá o tile diz "Conectando…". */
   drawing: number[];
   /** Slots cujo áudio está tocando, para o dock saber se há som a controlar. */
-  comSom: number[];
+  withSound: number[];
   /**
    * A qualidade de cada transmissão assistida (RF-AST-17), amostrada a cada
    * segundo pela própria conexão — não pelo painel, que pode nem estar aberto.
    */
-  quality: Record<number, 'boa' | 'instavel' | 'ruim'>;
+  quality: Record<number, 'good' | 'unstable' | 'bad'>;
   /**
    * Volume geral, de 0 a 1. Mora aqui, e não em `useState`, porque é o mesmo
    * número que os nós de ganho usam — duas cópias sairiam de sincronia — e
@@ -40,24 +49,24 @@ export interface RoomSnapshot {
   volume: number;
   /** Quem não transmite aparece na grade? (RF-AST-14, "sem vídeo"). */
   showPeople: boolean;
-  /** 'grade' mostra todo mundo em células iguais; 'foco' dá o palco a uma tela. */
-  modo: 'grade' | 'foco';
-  /** 'conectando' até o primeiro open; 'caiu' enquanto o backoff espera. */
-  phase: 'parado' | 'conectando' | 'aberto' | 'caiu';
+  /** 'grid' mostra todo mundo em células iguais; 'focus' dá o palco a uma tela. */
+  mode: 'grid' | 'focus';
+  /** 'connecting' até o primeiro open; 'down' enquanto o backoff espera. */
+  phase: 'idle' | 'connecting' | 'open' | 'down';
 }
 
-const VAZIO: RoomSnapshot = {
+const EMPTY: RoomSnapshot = {
   room: null,
   participants: [],
   streams: [],
   watching: [],
   drawing: [],
-  comSom: [],
+  withSound: [],
   quality: {},
   volume: 1,
   showPeople: true,
-  modo: 'grade',
-  phase: 'parado',
+  mode: 'grid',
+  phase: 'idle',
 };
 
 /** Um decodificador vivo: o canvas é um nó só, e sobrevive fora do documento. */
@@ -68,7 +77,7 @@ interface Stream {
   audio: AudioPlayer | null;
   /** A transmissão anunciou áudio? Sem isto não dá para distinguir "não tem
    *  som" de "o som ainda não chegou" — e os dois parecem mudo (RN-AST-24). */
-  anunciouSom: boolean;
+  announcedSound: boolean;
 }
 
 export interface RoomHandlers {
@@ -101,7 +110,7 @@ export class RoomConnection {
   #tokens: RoomTokens | null = null;
   #delay = 1000;
   #timer: ReturnType<typeof setTimeout> | null = null;
-  #snapshot: RoomSnapshot = VAZIO;
+  #snapshot: RoomSnapshot = EMPTY;
   #listeners = new Set<() => void>();
   #handlers: RoomHandlers = {};
   #wsUrl: ((path: string) => string) | null = null;
@@ -128,9 +137,9 @@ export class RoomConnection {
   #volumePerPerson = new Map<string, number>();
   #showPeople = true;
   /** Quando o servidor avisou descarte por backpressure, por slot (RF-AST-18). */
-  #descartes = new Map<number, number>();
-  #amostrador: ReturnType<typeof setInterval> | null = null;
-  #modo: 'grade' | 'foco' = 'grade';
+  #drops = new Map<number, number>();
+  #sampler: ReturnType<typeof setInterval> | null = null;
+  #mode: 'grid' | 'focus' = 'grid';
 
   // ------------------------------------------------------------- assinatura
 
@@ -142,10 +151,10 @@ export class RoomConnection {
   getSnapshot = (): RoomSnapshot => this.#snapshot;
 
   /** Snapshot do servidor: estável, senão o React reclama de laço infinito. */
-  getServerSnapshot = (): RoomSnapshot => VAZIO;
+  getServerSnapshot = (): RoomSnapshot => EMPTY;
 
-  #publicar(mudanca: Partial<RoomSnapshot>): void {
-    this.#snapshot = { ...this.#snapshot, ...mudanca };
+  #publish(changes: Partial<RoomSnapshot>): void {
+    this.#snapshot = { ...this.#snapshot, ...changes };
     for (const listener of this.#listeners) listener();
   }
 
@@ -162,27 +171,27 @@ export class RoomConnection {
     this.#name = name;
     this.#handlers = handlers;
     this.#delay = 1000;
-    this.#abrir();
+    this.#open();
   }
 
-  #abrir(): void {
+  #open(): void {
     const tokens = this.#tokens;
     const wsUrl = this.#wsUrl;
     if (!tokens || !wsUrl) return;
 
-    this.#publicar({ phase: 'conectando' });
+    this.#publish({ phase: 'connecting' });
 
     const ws = new WebSocket(wsUrl(`/ws?t=${encodeURIComponent(tokens.viewerToken)}`));
     ws.binaryType = 'arraybuffer';
     this.#ws = ws;
 
-    let abriu = false;
+    let opened = false;
 
     ws.addEventListener('open', () => {
-      abriu = true;
-      this.#amostrador ??= setInterval(() => this.#amostrar(), 1000);
+      opened = true;
+      this.#sampler ??= setInterval(() => this.#sample(), 1000);
       this.#delay = 1000;
-      this.#publicar({ phase: 'aberto' });
+      this.#publish({ phase: 'open' });
 
       // Sem reenviar, o nome volta ao do Discord sozinho depois de reconectar.
       if (this.#name) ws.send(JSON.stringify({ type: 'rename', name: this.#name }));
@@ -210,20 +219,20 @@ export class RoomConnection {
       // Saímos da sala de propósito: nada a reconectar (RN-AST-26). A diferença
       // é `#tokens` ainda existir ou não.
       if (!this.#tokens) {
-        this.#publicar({ ...VAZIO, volume: this.#volume, showPeople: this.#showPeople, modo: this.#modo });
+        this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
         return;
       }
 
-      if (!abriu) {
+      if (!opened) {
         this.#tokens = null;
-        this.#publicar({ ...VAZIO, volume: this.#volume, showPeople: this.#showPeople, modo: this.#modo });
+        this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
         this.#handlers.onRejected?.();
         return;
       }
 
-      this.#publicar({ phase: 'caiu', participants: [], streams: [] });
+      this.#publish({ phase: 'down', participants: [], streams: [] });
       // Backoff exponencial: 1 s, dobrando, teto de 15 s (RF-AST-10).
-      this.#timer = setTimeout(() => this.#abrir(), this.#delay);
+      this.#timer = setTimeout(() => this.#open(), this.#delay);
       this.#delay = Math.min(this.#delay * 2, 15_000);
     });
 
@@ -233,27 +242,27 @@ export class RoomConnection {
   #message(msg: ServerMessage): void {
     switch (msg.type) {
       case 'state': {
-        const vivos = new Set((msg.streams ?? []).map((s) => s.slot));
+        const alive = new Set((msg.streams ?? []).map((s) => s.slot));
         for (const s of msg.streams ?? []) {
           const info = this.#available.get(s.slot) ?? { userId: s.userId, config: null };
           this.#available.set(s.slot, info);
         }
         // Limpa o que sumiu sem `stream-stop` — queda abrupta (RN-AST-27).
         for (const slot of [...this.#available.keys()]) {
-          if (!vivos.has(slot)) this.#available.delete(slot);
+          if (!alive.has(slot)) this.#available.delete(slot);
         }
         for (const slot of [...this.#streams.keys()]) {
-          if (!vivos.has(slot)) this.#fecharStream(slot);
+          if (!alive.has(slot)) this.#closeStream(slot);
         }
-        for (const slot of [...this.#watching]) if (!vivos.has(slot)) this.#watching.delete(slot);
+        for (const slot of [...this.#watching]) if (!alive.has(slot)) this.#watching.delete(slot);
 
-        this.#publicar({
+        this.#publish({
           room: msg.room,
           participants: msg.participants ?? [],
           streams: msg.streams ?? [],
           watching: [...this.#watching],
           drawing: [...this.#drawing],
-          comSom: this.#slotsComSom(),
+          withSound: this.#slotsWithSound(),
         });
         break;
       }
@@ -262,8 +271,8 @@ export class RoomConnection {
         // mundo (RN-AST-6).
         this.#available.set(msg.slot, { userId: msg.userId, config: null });
         this.#watching.delete(msg.slot);
-        this.#fecharStream(msg.slot);
-        this.#publicarSets();
+        this.#closeStream(msg.slot);
+        this.#publishSets();
         this.#handlers.onStreamStart?.(msg.slot, msg.userId);
         break;
 
@@ -271,7 +280,7 @@ export class RoomConnection {
         const info = this.#available.get(msg.slot);
         if (info) info.config = msg.config as unknown as RawVideoConfig;
         if (this.#watching.has(msg.slot)) {
-          this.#abrirStream(msg.slot, info?.userId ?? String(msg.slot));
+          this.#openStream(msg.slot, info?.userId ?? String(msg.slot));
           this.#streams.get(msg.slot)?.player.start(msg.config as unknown as RawVideoConfig);
         }
         break;
@@ -281,22 +290,34 @@ export class RoomConnection {
         // Pode chegar antes de eu pedir para assistir; aí não há o que ligar, e
         // o servidor reenvia assim que o pedido chegar (RN-AUD-9).
         if (this.#watching.has(msg.slot)) {
-          this.#ligarSom(msg.slot, msg.config as unknown as RawAudioConfig);
+          this.#startAudio(msg.slot, msg.config as unknown as RawAudioConfig);
         }
         break;
 
       case 'stream-stop':
         this.#available.delete(msg.slot);
         this.#watching.delete(msg.slot);
-        this.#fecharStream(msg.slot);
-        this.#publicarSets();
+        this.#closeStream(msg.slot);
+        this.#publishSets();
         break;
 
-      case 'dropped':
+      case 'dropped': {
         // O servidor está descartando quadros nossos: o gargalo é a nossa rede,
         // não a de quem transmite (RF-AST-18).
-        this.#descartes.set(msg.slot, Date.now());
+        this.#drops.set(msg.slot, Date.now());
+
+        // Faz tempo que não desenha um quadro — ou nunca desenhou nenhum — e o
+        // servidor continua descartando: é o sinal de que o keyframe que
+        // destravaria a imagem também está se perdendo no caminho (RF-AST-18a).
+        // Sem isto, quem cai nesse buraco ficava preso em "Conectando…" para
+        // sempre, ou vendo a imagem congelada até o próximo keyframe
+        // periódico — até 3 s depois — em vez de pedir um agora.
+        const lastFrame = this.#lastFrameAt.get(msg.slot) ?? 0;
+        if (this.#watching.has(msg.slot) && Date.now() - lastFrame > STALL_MS) {
+          this.#send({ type: 'rewatch', slot: msg.slot });
+        }
         break;
+      }
 
       case 'room-gone':
         this.#tokens = null;
@@ -321,7 +342,7 @@ export class RoomConnection {
    * leitores brigariam pelo mesmo contador, e o painel de detalhes passaria a
    * ver zero sempre.
    */
-  #amostrar(): void {
+  #sample(): void {
     const target = 30;
     const quality: RoomSnapshot['quality'] = {};
 
@@ -331,82 +352,103 @@ export class RoomConnection {
 
       const lag = stream.player.getLag();
       const fps = stream.player.takeFrameCount();
-      const descartando = Date.now() - (this.#descartes.get(slot) ?? 0) < 3000;
+      const dropping = Date.now() - (this.#drops.get(slot) ?? 0) < 3000;
 
       quality[slot] =
-        descartando || lag > 800 || fps < target * 0.5
-          ? 'ruim'
+        dropping || lag > 800 || fps < target * 0.5
+          ? 'bad'
           : lag > 300 || fps < target * 0.8
-            ? 'instavel'
-            : 'boa';
-      this.#ultimoFps.set(slot, fps);
+            ? 'unstable'
+            : 'good';
+      this.#lastFps.set(slot, fps);
     }
 
-    this.#publicar({ quality });
+    this.#publish({ quality });
   }
 
   /** O último fps amostrado, para o painel não brigar pelo contador. */
-  #ultimoFps = new Map<number, number>();
+  #lastFps = new Map<number, number>();
 
-  #publicarSets(): void {
-    this.#publicar({
+  /**
+   * Quando o slot desenhou um quadro pela última vez (RF-AST-18a).
+   *
+   * Ausente = nunca desenhou. É o que diferencia "travou" de "não abriu
+   * ainda": os dois pedem `rewatch`, mas por sinais diferentes — ver `dropped`
+   * em `#message`.
+   */
+  #lastFrameAt = new Map<number, number>();
+
+  #publishSets(): void {
+    this.#publish({
       watching: [...this.#watching],
       drawing: [...this.#drawing],
-      comSom: this.#slotsComSom(),
+      withSound: this.#slotsWithSound(),
     });
   }
 
-  #slotsComSom(): number[] {
+  #slotsWithSound(): number[] {
     return [...this.#streams.entries()].filter(([, s]) => s.audio?.hasSound()).map(([slot]) => slot);
   }
 
   /** O que sai no alto-falante é o produto dos dois volumes (RF-AUD-1). */
-  #volumeDe(userId: string): number {
+  #volumeFor(userId: string): number {
     return this.#volume * (this.#volumePerPerson.get(userId) ?? 1);
   }
 
-  #abrirStream(slot: number, userId: string): Stream {
-    const existente = this.#streams.get(slot);
-    if (existente) return existente;
+  #openStream(slot: number, userId: string): Stream {
+    const existing = this.#streams.get(slot);
+    if (existing) return existing;
 
     // O canvas nasce fora do documento e assim continua entre renderizações.
     const canvas = document.createElement('canvas');
-    canvas.className = 'max-h-full max-w-full';
+    // O enquadramento sai daqui, e é justo por construção: o buffer fica no
+    // tamanho nativo do vídeo (RN-AST-18), o que dá ao canvas a **proporção
+    // intrínseca** da tela transmitida, como uma imagem tem. Com os dois
+    // máximos ele encolhe até caber — sem tarja e sem corte, em tile de
+    // qualquer formato. Medido em 16/9, 4/3 e 9/16, dentro de pais largos e
+    // altos.
+    //
+    // `min-h-0 min-w-0` não é enfeite: item de grade nasce com `min-height:
+    // auto`, que é o tamanho mínimo do conteúdo e **vence o `max-height`**.
+    // Sem isso o canvas escala pela largura e transborda — era daí que vinha o
+    // rodapé cortado da tela compartilhada, junto da barra de tarefas.
+    canvas.className = 'block min-h-0 min-w-0 max-h-full max-w-full';
 
     const player = createPlayer(canvas, {
       onError: (m) => this.#handlers.onError?.(m),
-      onTamanho: () => {
+      onFrame: () => this.#lastFrameAt.set(slot, Date.now()),
+      onSize: () => {
         // Primeiro quadro desenhado: o tile pode tirar o "Conectando…".
         if (!this.#drawing.has(slot)) {
           this.#drawing.add(slot);
-          this.#publicarSets();
+          this.#publishSets();
         }
       },
     });
 
-    const stream: Stream = { userId, canvas, player, audio: null, anunciouSom: false };
+    const stream: Stream = { userId, canvas, player, audio: null, announcedSound: false };
     this.#streams.set(slot, stream);
     return stream;
   }
 
-  #ligarSom(slot: number, config: RawAudioConfig): void {
+  #startAudio(slot: number, config: RawAudioConfig): void {
     const stream = this.#streams.get(slot);
     if (!stream) return;
 
-    stream.anunciouSom = true;
+    stream.announcedSound = true;
 
     stream.audio?.stop();
     const audio = createAudio({
       onError: (m) => this.#handlers.onError?.(m),
-      volume: this.#volumeDe(stream.userId),
+      volume: this.#volumeFor(stream.userId),
     });
     if (audio.start(config)) {
       stream.audio = audio;
-      this.#publicarSets();
+      this.#publishSets();
     }
   }
 
-  #fecharStream(slot: number): void {
+  #closeStream(slot: number): void {
     const stream = this.#streams.get(slot);
     if (!stream) return;
     stream.player.stop();
@@ -414,6 +456,10 @@ export class RoomConnection {
     stream.canvas.remove();
     this.#streams.delete(slot);
     this.#drawing.delete(slot);
+    // Slot é reciclado entre transmissores (RN-PRO-*, no máximo 4 ao mesmo
+    // tempo): sem isto, um carimbo velho da transmissão anterior podia
+    // convencer o vigia de travamento de que a nova já desenhou algo.
+    this.#lastFrameAt.delete(slot);
   }
 
   /**
@@ -423,7 +469,7 @@ export class RoomConnection {
    * não significaria nada. O `fps` é lido-e-zerado, então quem chama precisa
    * chamar uma vez por segundo — é a contagem do último segundo, não um total.
    */
-  diagnostico(slot: number): {
+  diagnostics(slot: number): {
     lag: number;
     fps: number;
     video: string;
@@ -434,10 +480,10 @@ export class RoomConnection {
     const stream = this.#streams.get(slot);
     if (!stream) return null;
 
-    const volume = this.#volumeDe(stream.userId);
+    const volume = this.#volumeFor(stream.userId);
     // Quatro estados que, sem esta distinção, parecem todos "sem som"
     // (RN-AST-24).
-    const sound = !stream.anunciouSom
+    const sound = !stream.announcedSound
       ? 'sem'
       : !stream.audio?.hasSound()
         ? 'aguardando'
@@ -449,21 +495,21 @@ export class RoomConnection {
     // elemento (300×150), e mostrar isso como resolução do vídeo é dar um
     // número falso justamente enquanto a pessoa espera para saber se algo está
     // acontecendo.
-    const desenhou = this.#drawing.has(slot);
-    const tamanhos = stream.player.getSizes();
+    const drawn = this.#drawing.has(slot);
+    const sizes = stream.player.getSizes();
 
     return {
-      lag: desenhou ? stream.player.getLag() : 0,
-      fps: this.#ultimoFps.get(slot) ?? 0,
-      video: desenhou ? tamanhos.video : '—',
-      box: tamanhos.box,
+      lag: drawn ? stream.player.getLag() : 0,
+      fps: this.#lastFps.get(slot) ?? 0,
+      video: drawn ? sizes.video : '—',
+      box: sizes.box,
       sound,
       volume,
     };
   }
 
   /** O canvas de um slot, para o tile anexá-lo. Um nó só, sempre (RN-AST-17). */
-  canvasDe(slot: number): HTMLCanvasElement | null {
+  canvasFor(slot: number): HTMLCanvasElement | null {
     return this.#streams.get(slot)?.canvas ?? null;
   }
 
@@ -480,39 +526,39 @@ export class RoomConnection {
     if (!info) return;
 
     this.#watching.add(slot);
-    this.#abrirStream(slot, info.userId);
+    this.#openStream(slot, info.userId);
     // A config guardada serve de partida enquanto o keyframe novo não chega.
     if (info.config) this.#streams.get(slot)?.player.start(info.config);
     this.#send({ type: 'watch', slot });
-    this.#publicarSets();
+    this.#publishSets();
   }
 
   unwatch(slot: number): void {
     if (!this.#watching.delete(slot)) return;
-    this.#fecharStream(slot);
+    this.#closeStream(slot);
     this.#send({ type: 'unwatch', slot });
-    this.#publicarSets();
+    this.#publishSets();
   }
 
   /** Volume geral, de 0 a 1. Zero é o mudo — um número só (RN-AUD-12). */
   setVolume(value: number): void {
     this.#volume = Math.min(1, Math.max(0, value));
     for (const [, stream] of this.#streams) {
-      stream.audio?.setVolume(this.#volumeDe(stream.userId));
+      stream.audio?.setVolume(this.#volumeFor(stream.userId));
     }
-    this.#publicar({ volume: this.#volume });
+    this.#publish({ volume: this.#volume });
   }
 
   /** O volume guardado de uma pessoa. 1 é o padrão e não é registrado (RN-AUD-11). */
-  volumeDe(userId: string): number {
+  volumeFor(userId: string): number {
     return this.#volumePerPerson.get(userId) ?? 1;
   }
 
   /** Volume de uma pessoa, de 0 a 2. Guardado por pessoa, não por sessão. */
-  setVolumeDe(userId: string, value: number): void {
+  setVolumeFor(userId: string, value: number): void {
     this.#volumePerPerson.set(userId, Math.min(2, Math.max(0, value)));
     for (const [, stream] of this.#streams) {
-      if (stream.userId === userId) stream.audio?.setVolume(this.#volumeDe(userId));
+      if (stream.userId === userId) stream.audio?.setVolume(this.#volumeFor(userId));
     }
   }
 
@@ -522,29 +568,32 @@ export class RoomConnection {
    * A escolha vive no armazenamento, como as outras preferências de quem
    * assiste (RN-AST-29): é dela a decisão, não do sistema.
    */
-  setModo(modo: 'grade' | 'foco'): void {
-    this.#modo = modo;
-    store('modo', modo);
-    this.#publicar({ modo });
+  setMode(mode: 'grid' | 'focus'): void {
+    this.#mode = mode;
+    // A chave e os valores no disco seguem em português (RN-UI-*: dado já
+    // gravado de quem usa não se renomeia) — só o código ao redor virou
+    // inglês. Por isso a tradução na borda, os dois sentidos.
+    store('modo', mode === 'focus' ? 'foco' : 'grade');
+    this.#publish({ mode });
   }
 
   /** Recolhe ou mostra as pessoas sem vídeo, e guarda a escolha (RF-AST-14). */
-  mostrarPessoas(visivel: boolean): void {
-    this.#showPeople = visivel;
-    store('pessoas', visivel ? '1' : '0');
-    this.#publicar({ showPeople: visivel });
+  setShowPeople(visible: boolean): void {
+    this.#showPeople = visible;
+    store('pessoas', visible ? '1' : '0');
+    this.#publish({ showPeople: visible });
   }
 
   /** Restaura os volumes guardados antes de qualquer som começar. */
-  carregarVolumes(geral: number, perPerson: Map<string, number>): void {
-    this.#volume = geral;
+  loadVolumes(overall: number, perPerson: Map<string, number>): void {
+    this.#volume = overall;
     this.#volumePerPerson = perPerson;
     this.#showPeople = read('pessoas') !== '0';
-    this.#modo = read('modo') === 'foco' ? 'foco' : 'grade';
-    this.#publicar({
-      volume: geral,
+    this.#mode = read('modo') === 'foco' ? 'focus' : 'grid';
+    this.#publish({
+      volume: overall,
       showPeople: this.#showPeople,
-      modo: this.#modo,
+      mode: this.#mode,
     });
   }
 
@@ -555,7 +604,7 @@ export class RoomConnection {
    * parar (RN-TRX-31). Ele resolve por `uid` e encerra só a de quem pediu —
    * ninguém derruba a tela de outra pessoa (RN-PRO-16).
    */
-  pedirParada(): void {
+  requestStop(): void {
     this.#send({ type: 'stop-broadcast' });
   }
 
@@ -581,15 +630,15 @@ export class RoomConnection {
     this.#send({ type: 'leave' });
 
     this.#tokens = null;
-    if (this.#amostrador) clearInterval(this.#amostrador);
-    this.#amostrador = null;
-    for (const slot of [...this.#streams.keys()]) this.#fecharStream(slot);
+    if (this.#sampler) clearInterval(this.#sampler);
+    this.#sampler = null;
+    for (const slot of [...this.#streams.keys()]) this.#closeStream(slot);
     this.#available.clear();
     this.#watching.clear();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.#ws?.close();
     this.#ws = null;
-    this.#publicar({ ...VAZIO, volume: this.#volume, showPeople: this.#showPeople, modo: this.#modo });
+    this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
   }
 }

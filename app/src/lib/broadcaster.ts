@@ -23,9 +23,9 @@ const KEYFRAME_EVERY_MS = 3000;
 
 // O áudio anda pelo mesmo socket e pelo mesmo cabeçalho do vídeo: um canal só,
 // um formato só, e o servidor continua repassando o buffer sem abrir nada.
-const TIPO_KEYFRAME = 1;
-const TIPO_DELTA = 2;
-const TIPO_AUDIO = 3;
+const TYPE_KEYFRAME = 1;
+const TYPE_DELTA = 2;
+const TYPE_AUDIO = 3;
 
 /** Opus estéreo a 96 kbps: transparente, e ruído perto do vídeo (RN-TRX-27). */
 const AUDIO_BITRATE = 96_000;
@@ -79,7 +79,7 @@ export interface BroadcastStats {
 }
 
 /** O que a prévia mostra antes de qualquer byte sair (RF-TRX-12). */
-export interface Previa {
+export interface Preview {
   track: MediaStreamTrack;
   width: number;
   height: number;
@@ -89,16 +89,16 @@ export interface Previa {
 
 export interface Broadcaster {
   /** Capture e prepara, **sem enviar nada** (RN-TRX-38). */
-  preparar: () => Promise<Previa>;
+  prepare: () => Promise<Preview>;
   /** A faixa capturada, para a prévia desenhar. null antes de preparar. */
-  faixaPreparada: () => MediaStreamTrack | null;
-  /** Conecta e começa a enviar o que `preparar` deixou pronto. */
+  preparedTrack: () => MediaStreamTrack | null;
+  /** Conecta e começa a enviar o que `prepare` deixou pronto. */
   goLive: () => Promise<MediaStream>;
   /** Preparar e ir ao ar de uma vez, para quem não quer prévia. */
   start: () => Promise<MediaStream>;
   stop: (reason?: string) => void;
   changeScreen: () => Promise<MediaStream>;
-  trocarSom: () => Promise<MediaStreamTrack>;
+  swapSound: () => Promise<MediaStreamTrack>;
   setQuality: (opts: { bitrate?: number; fps?: number; maxHeight?: number }) => void;
   getSettings: () => { bitrate: number; fps: number };
   hasSound: () => boolean;
@@ -116,7 +116,7 @@ export function createBroadcaster({
   onStats,
   onEnd,
   onError,
-  onAviso,
+  onNotice,
 }: {
   wsUrl: string;
   bitrate: number;
@@ -128,7 +128,7 @@ export function createBroadcaster({
   onStats?: (stats: BroadcastStats) => void;
   onEnd?: (reason: string) => void;
   onError?: (msg: string) => void;
-  onAviso?: (msg: string) => void;
+  onNotice?: (msg: string) => void;
 }): Broadcaster {
   let ws: WebSocket | null = null;
   let stream: MediaStream | null = null;
@@ -170,6 +170,16 @@ export function createBroadcaster({
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,
+      // 48 kHz é o único que os dois lados do pipeline concordam de verdade
+      // (RN-AUD-14): Opus só decodifica de forma confiável em 8/12/16/24/48
+      // kHz, e é o `AudioDecoder` de quem assiste que rejeita o resto — sem
+      // erro síncrono, sem `isConfigSupported()` acusar nada, só o `error`
+      // calado depois. Sem pedir aqui, a faixa vem na taxa nativa do
+      // dispositivo — 44100 é a mais comum em hardware de verdade — e o som
+      // nunca chegava a tocar. `ideal`, não `exact`: um dispositivo que
+      // realmente não sabe reamostrar continua transmitindo, só que sem som,
+      // em vez de a captura inteira falhar.
+      sampleRate: { ideal: 48_000 },
     };
     if (navigator.mediaDevices.getSupportedConstraints().restrictOwnAudio) {
       c.restrictOwnAudio = true;
@@ -187,16 +197,16 @@ export function createBroadcaster({
    * alcança. Então "som da tela inteira" é sempre "som do sistema INTEIRO", com
    * a saída do Discord dentro. Aba é diferente: o som sai só dali.
    */
-  function prepararSom(videoTrack: MediaStreamTrack, capturado: MediaStream): MediaStreamTrack | null {
-    const faixa = capturado.getAudioTracks()[0];
-    if (!faixa) return null;
+  function prepareSound(videoTrack: MediaStreamTrack, captured: MediaStream): MediaStreamTrack | null {
+    const audioTrack = captured.getAudioTracks()[0];
+    if (!audioTrack) return null;
 
-    if (videoTrack.getSettings().displaySurface === 'browser') return faixa;
+    if (videoTrack.getSettings().displaySurface === 'browser') return audioTrack;
 
-    faixa.stop();
-    capturado.removeTrack(faixa);
+    audioTrack.stop();
+    captured.removeTrack(audioTrack);
     soundBlocked = true;
-    onAviso?.(
+    onNotice?.(
       'A tela inteira carrega o som do Discord junto, e a call se ouviria em eco. ' +
         'Transmitindo sem som — use "Som de uma aba" para escolher de onde vem o áudio.'
     );
@@ -208,7 +218,7 @@ export function createBroadcaster({
 
     const data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
-    ws.send(empacotar(TIPO_AUDIO, chunk.timestamp, data));
+    ws.send(packFrame(TYPE_AUDIO, chunk.timestamp, data));
     bytes += 18 + data.byteLength;
   }
 
@@ -223,6 +233,22 @@ export function createBroadcaster({
     if (!('AudioEncoder' in window) || !('MediaStreamTrackProcessor' in window)) return;
 
     const s = track.getSettings();
+    // O `sampleRate` que a faixa relata — e é o que ela relata **depois** do
+    // pedido de 48 kHz em `audioConstraints()` (RN-AUD-14) ter sido honrado.
+    // Não force um valor aqui sem mudar o pedido de captura: `AudioEncoder`
+    // não reamostra o `AudioData` de entrada — `encode()` **lança exceção** se
+    // a taxa dele não bater exatamente com a configurada (testado direto:
+    // alimentar um encoder a 48000 com áudio marcado a 44100 dá
+    // `EncodingError: Input audio buffer is incompatible with codec
+    // parameters`). Por isso o pedido tem que acontecer na origem.
+    //
+    // A causa do "sem áudio nunca": sem o pedido, a faixa vinha na taxa nativa
+    // do dispositivo — 44100 é a mais comum em hardware de verdade — e o
+    // `AudioDecoder.configure()` de quem assiste falhava com ela **de forma
+    // assíncrona**: nem lança exceção, nem `isConfigSupported()` acusa nada,
+    // só o `error` do decoder dispara depois, calado (testado isolado: 44100
+    // falha, 48000 funciona, com o mesmo config literal). Som nunca tocava em
+    // nenhuma transmissão cujo dispositivo não fosse nativamente 48 kHz.
     const sampleRate = s.sampleRate ?? 48_000;
     const numberOfChannels = Math.min(2, s.channelCount ?? 2);
 
@@ -295,7 +321,7 @@ export function createBroadcaster({
    * (RN-PRO-17), e o relógio de envio é o que permite medir o atraso do outro
    * lado. Áudio e vídeo compartilham o formato (RN-PRO-18).
    */
-  function empacotar(kind: number, timestamp: number, data: Uint8Array): ArrayBuffer {
+  function packFrame(kind: number, timestamp: number, data: Uint8Array): ArrayBuffer {
     const buf = new ArrayBuffer(18 + data.byteLength);
     const view = new DataView(buf);
     view.setUint8(0, mySlot);
@@ -334,7 +360,7 @@ export function createBroadcaster({
     const data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
 
-    const buf = empacotar(chunk.type === 'key' ? TIPO_KEYFRAME : TIPO_DELTA, chunk.timestamp, data);
+    const buf = packFrame(chunk.type === 'key' ? TYPE_KEYFRAME : TYPE_DELTA, chunk.timestamp, data);
     ws.send(buf);
     bytes += buf.byteLength;
   }
@@ -596,7 +622,7 @@ export function createBroadcaster({
   }
 
   /** A faixa preparada, esperando a confirmação da prévia. */
-  let preparada: MediaStreamTrack | null = null;
+  let preparedTrack: MediaStreamTrack | null = null;
 
   /**
    * Capture e escolhe o codec, **sem abrir socket nem encoder** (RN-TRX-38).
@@ -604,16 +630,16 @@ export function createBroadcaster({
    * É aqui que a prévia se apoia: a pessoa ainda não está no ar, então trocar
    * de tela ou resolver o som barrado não custa nada a ninguém (RN-TRX-37).
    */
-  async function preparar(): Promise<Previa> {
+  async function prepare(): Promise<Preview> {
     // Precisa vir do gesto do usuário; qualquer await antes disso o invalida
     // (RN-TRX-6).
-    const capturado = await navigator.mediaDevices.getDisplayMedia({
+    const captured = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: fps, max: fps } },
       audio: audio ? audioConstraints() : false,
     });
-    stream = capturado;
+    stream = captured;
 
-    const track = capturado.getVideoTracks()[0];
+    const track = captured.getVideoTracks()[0];
     if (!track) {
       cleanup();
       throw new Error('A captura veio sem imagem.');
@@ -635,22 +661,22 @@ export function createBroadcaster({
 
     // O som é resolvido já na preparação: é o que permite oferecer "Som de uma
     // aba" antes de alguém ver a tela errada (RN-TRX-37).
-    const faixaSom = prepararSom(track, capturado);
-    preparada = track;
+    const soundTrack = prepareSound(track, captured);
+    preparedTrack = track;
 
     return {
       track,
       width: target.width,
       height: target.height,
-      hasSound: Boolean(faixaSom),
+      hasSound: Boolean(soundTrack),
       soundBlocked,
     };
   }
 
   async function goLive(): Promise<MediaStream> {
-    const track = preparada;
-    const capturado = stream;
-    if (!track || !capturado || !config) throw new Error('Nada preparado para transmitir.');
+    const track = preparedTrack;
+    const captured = stream;
+    if (!track || !captured || !config) throw new Error('Nada preparado para transmitir.');
 
     await connect();
 
@@ -690,15 +716,15 @@ export function createBroadcaster({
     pump(track);
     // Pedir áudio não garante receber (RN-TRX-26): em vários sistemas a caixa
     // "compartilhar o som" fica desmarcada e o navegador devolve a tela sem
-    // faixa de som. A faixa já foi decidida em preparar().
-    const audioTrack = capturado.getAudioTracks()[0];
+    // faixa de som. A faixa já foi decidida em prepare().
+    const audioTrack = captured.getAudioTracks()[0];
     if (audioTrack) void pumpAudio(audioTrack);
 
-    return capturado;
+    return captured;
   }
 
   async function start(): Promise<MediaStream> {
-    await preparar();
+    await prepare();
     return goLive();
   }
 
@@ -708,27 +734,27 @@ export function createBroadcaster({
    * É o que torna som e tela inteira compatíveis: o vídeo continua sendo a tela
    * escolhida e o som passa a vir de uma aba, que é isolada por construção.
    */
-  async function trocarSom(): Promise<MediaStreamTrack> {
-    const escolha = await navigator.mediaDevices.getDisplayMedia({
+  async function swapSound(): Promise<MediaStreamTrack> {
+    const choice = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: audioConstraints(),
     });
 
-    const faixa = escolha.getAudioTracks()[0];
-    const superficie = escolha.getVideoTracks()[0]?.getSettings().displaySurface;
+    const audioTrack = choice.getAudioTracks()[0];
+    const surface = choice.getVideoTracks()[0]?.getSettings().displaySurface;
 
     // O vídeo desta escolha não interessa: viemos só pelo som.
-    escolha.getVideoTracks().forEach((t) => t.stop());
+    choice.getVideoTracks().forEach((t) => t.stop());
 
-    if (!faixa) {
-      escolha.getTracks().forEach((t) => t.stop());
+    if (!audioTrack) {
+      choice.getTracks().forEach((t) => t.stop());
       throw new Error(
         'Essa escolha veio sem som. Escolha uma aba e marque "Compartilhar o áudio da guia".'
       );
     }
 
-    if (superficie !== 'browser') {
-      faixa.stop();
+    if (surface !== 'browser') {
+      audioTrack.stop();
       throw new Error(
         'Só aba tem som isolado. Screen inteira traria o Discord junto e a call se ouviria.'
       );
@@ -748,9 +774,9 @@ export function createBroadcaster({
     audioEncoder = null;
 
     soundBlocked = false;
-    faixa.addEventListener('ended', () => onAviso?.('A aba do som foi fechada.'));
-    void pumpAudio(faixa);
-    return faixa;
+    audioTrack.addEventListener('ended', () => onNotice?.('A aba do som foi fechada.'));
+    void pumpAudio(audioTrack);
+    return audioTrack;
   }
 
   /**
@@ -795,8 +821,8 @@ export function createBroadcaster({
     // A tela nova traz a própria faixa de som; a antiga morreu com o stream.
     await audioReader?.cancel().catch(() => {});
     audioReader = null;
-    const novoAudio = prepararSom(track, fresh);
-    if (novoAudio && audioEncoder) void pumpAudio(novoAudio);
+    const newAudio = prepareSound(track, fresh);
+    if (newAudio && audioEncoder) void pumpAudio(newAudio);
 
     return fresh;
   }
@@ -835,13 +861,13 @@ export function createBroadcaster({
   }
 
   return {
-    preparar,
-    faixaPreparada: () => preparada,
+    prepare,
+    preparedTrack: () => preparedTrack,
     goLive,
     start,
     stop,
     changeScreen,
-    trocarSom,
+    swapSound,
     setQuality,
     getSettings: () => ({ bitrate, fps }),
     hasSound: () => Boolean(audioEncoder),

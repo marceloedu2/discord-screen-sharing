@@ -15,7 +15,7 @@ import { useDiscord } from "@/contexts/discord";
  * Activity (RN-PRO-4).
  */
 
-const FORMA =
+const SHAPE =
   "grid aspect-square w-[clamp(48px,22%,90px)] place-items-center rounded-full" +
   " text-[clamp(16px,4vw,28px)] font-semibold text-white select-none";
 
@@ -34,12 +34,12 @@ export function Avatar({
   const { api } = useDiscord();
   // Uma URL que falha no meio do caminho cai nas iniciais em vez de deixar o
   // ícone quebrado do navegador dentro do tile.
-  const [falhou, setFalhou] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  if (!avatar || falhou) {
+  if (!avatar || failed) {
     return (
       <span
-        className={`${FORMA} ${className}`}
+        className={`${SHAPE} ${className}`}
         style={{ background: colorOf(id) }}
         // A imagem tem alt com o nome; aqui o nome já está escrito ao lado, no
         // rodapé do tile. Repetir faria o leitor de tela dizer duas vezes.
@@ -60,8 +60,8 @@ export function Avatar({
       alt={name}
       width={128}
       height={128}
-      className={`${FORMA} object-cover ${className}`}
-      onError={() => setFalhou(true)}
+      className={`${SHAPE} object-cover ${className}`}
+      onError={() => setFailed(true)}
     />
   );
 }

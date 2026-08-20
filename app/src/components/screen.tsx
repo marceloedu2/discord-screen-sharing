@@ -47,7 +47,7 @@ export function Screen({
   /** "9/12" quando a transmissão passa de 75% do teto (RF-AST-12). */
   occupancy?: string | null;
   /** Boa, instável ou ruim — o resumo do que o painel detalha (RF-AST-17). */
-  connectionQuality?: 'boa' | 'instavel' | 'ruim' | undefined;
+  connectionQuality?: 'good' | 'unstable' | 'bad' | undefined;
   /** O canvas está na janela destacada, então aqui não há o que mostrar. */
   poppedOut?: boolean;
   /** Na faixa de miniaturas o tile tem 186×104 — avatar e botão em tamanho
@@ -63,11 +63,11 @@ export function Screen({
 
   useEffect(() => {
     if (!watching) return;
-    const canvas = connection.canvasDe(slot);
-    const destino = box.current;
-    if (!canvas || !destino) return;
+    const canvas = connection.canvasFor(slot);
+    const target = box.current;
+    if (!canvas || !target) return;
 
-    destino.appendChild(canvas);
+    target.appendChild(canvas);
     // Não removemos o canvas na limpeza: ele pertence à conexão, e tirá-lo daqui
     // é trabalho de quem o receber a seguir. Apagar seria perder o conteúdo.
     return undefined;
@@ -106,16 +106,16 @@ export function Screen({
         {/* Três estados, derivados do que já é medido (RF-AST-17). O painel ⓘ
             continua existindo para o número exato — este é o resumo
             (RN-AST-35). */}
-        {connectionQuality && connectionQuality !== "boa" ? (
+        {connectionQuality && connectionQuality !== "good" ? (
           <span
-            title={connectionQuality === "ruim" ? "Conexão ruim" : "Conexão instável"}
+            title={connectionQuality === "bad" ? "Conexão ruim" : "Conexão instável"}
             className={
               "grid size-5 place-items-center rounded-full bg-black/65 text-[11px] backdrop-blur-[8px] " +
-              (connectionQuality === "ruim" ? "text-perigo" : "text-atencao")
+              (connectionQuality === "bad" ? "text-perigo" : "text-atencao")
             }
           >
             <span className="sr-only">
-              {connectionQuality === "ruim" ? "Conexão ruim" : "Conexão instável"}
+              {connectionQuality === "bad" ? "Conexão ruim" : "Conexão instável"}
             </span>
             <span aria-hidden="true">▲</span>
           </span>
@@ -124,7 +124,7 @@ export function Screen({
         {/* A recusa por lotação não pode chegar de surpresa (RF-AST-12). */}
         {occupancy ? (
           <span className="rounded bg-black/65 px-1.5 py-0.5 text-[11px] font-semibold text-atencao backdrop-blur-[8px]">
-            {occupancy} watching
+            {occupancy} assistindo
           </span>
         ) : null}
         {quality ? (
@@ -144,7 +144,7 @@ export function Screen({
               — justamente durante a espera que RF-AST-5 quer explicar. */}
           <div
             ref={box}
-            className={`grid h-full w-full place-items-center ${drawing ? "" : "invisible"}`}
+            className={`relative grid h-full w-full min-h-0 place-items-center ${drawing ? "" : "invisible"}`}
           />
           {/* Entre pedir para assistir e o primeiro quadro cabe um keyframe
               inteiro de espera, e um tile parado é indistinguível de um
@@ -218,7 +218,7 @@ export function Screen({
             <path d="M8 21h8" />
           </svg>
         </span>
-        <span className={`truncate font-medium text-text ${compact ? "text-[11px]" : "text-[13px]"}`}>
+        <span className={`truncate font-medium text-texto ${compact ? "text-[11px]" : "text-[13px]"}`}>
           {name}
           {isMe ? " (você)" : ""}
         </span>

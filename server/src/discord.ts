@@ -78,20 +78,20 @@ export async function channelName(guildId: string, channelId: string): Promise<s
       return null;
     }
 
-    const canais = (await r.json()) as Array<{
+    const channels = (await r.json()) as Array<{
       id: string;
       name?: string;
       parent_id?: string | null;
     }>;
 
-    const canal = canais.find((c) => c.id === channelId);
-    if (!canal?.name) return null;
+    const channel = channels.find((c) => c.id === channelId);
+    if (!channel?.name) return null;
 
-    const categoria = canal.parent_id
-      ? canais.find((c) => c.id === canal.parent_id)?.name
+    const category = channel.parent_id
+      ? channels.find((c) => c.id === channel.parent_id)?.name
       : undefined;
 
-    return categoria ? `${categoria} / ${canal.name}` : canal.name;
+    return category ? `${category} / ${channel.name}` : channel.name;
   } catch (err) {
     console.warn('[canal] falhou:', err instanceof Error ? err.message : err);
     return null;
@@ -139,10 +139,10 @@ export type Presence = 'in' | 'out' | 'unknown';
  * e o outro é a pessoa realmente fora da call. Tratá-los igual tranca gente
  * para fora por um problema que é nosso.
  */
-export type Voz =
-  | { tipo: 'em'; canal: string }
-  | { tipo: 'fora' }
-  | { tipo: 'indeterminado' };
+export type VoiceLocation =
+  | { type: 'in'; channel: string }
+  | { type: 'out' }
+  | { type: 'unknown' };
 
 /**
  * Em qual canal de voz daquele servidor esta pessoa está.
@@ -151,8 +151,8 @@ export type Voz =
  * não veio pela Activity, então não há `channel_id` vindo do cliente — quem
  * responde qual é o canal é o Discord, com o token do bot.
  */
-export async function voiceChannelOf(guildId: string, userId: string): Promise<Voz> {
-  if (!DISCORD_BOT_TOKEN) return { tipo: 'indeterminado' };
+export async function voiceChannelOf(guildId: string, userId: string): Promise<VoiceLocation> {
+  if (!DISCORD_BOT_TOKEN) return { type: 'unknown' };
 
   try {
     const r = await fetch(`${API}/v10/guilds/${guildId}/voice-states/${userId}`, {
@@ -163,19 +163,19 @@ export async function voiceChannelOf(guildId: string, userId: string): Promise<V
       // Mesma distinção de inVoiceChannel: "Unknown Guild" é falta de
       // visibilidade nossa, não ausência da pessoa.
       const err = (await r.json().catch(() => null)) as { code?: number } | null;
-      return err?.code === 10004 ? { tipo: 'indeterminado' } : { tipo: 'fora' };
+      return err?.code === 10004 ? { type: 'unknown' } : { type: 'out' };
     }
 
     if (!r.ok) {
       console.warn(`[voz] Discord respondeu ${r.status} ao buscar o canal`);
-      return { tipo: 'indeterminado' };
+      return { type: 'unknown' };
     }
 
     const state = (await r.json()) as { channel_id?: string | null };
-    return state.channel_id ? { tipo: 'em', canal: state.channel_id } : { tipo: 'fora' };
+    return state.channel_id ? { type: 'in', channel: state.channel_id } : { type: 'out' };
   } catch (err) {
     console.warn('[voz] falhou:', err instanceof Error ? err.message : err);
-    return { tipo: 'indeterminado' };
+    return { type: 'unknown' };
   }
 }
 

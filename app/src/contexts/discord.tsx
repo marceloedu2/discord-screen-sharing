@@ -43,7 +43,7 @@ type Discord = {
   ws: (path: string) => string;
 };
 
-const ContextoDiscord = createContext<Discord | null>(null);
+const DiscordContext = createContext<Discord | null>(null);
 
 export function DiscordProvider({ children }: { children: ReactNode }) {
   const params = useSearchParams();
@@ -62,7 +62,7 @@ export function DiscordProvider({ children }: { children: ReactNode }) {
     };
   }, [inDiscord]);
 
-  return <ContextoDiscord value={value}>{children}</ContextoDiscord>;
+  return <DiscordContext value={value}>{children}</DiscordContext>;
 }
 
 /**
@@ -72,7 +72,7 @@ export function DiscordProvider({ children }: { children: ReactNode }) {
  * sai, o proxy do Discord recusa, e o erro aparece longe daqui.
  */
 export function useDiscord(): Discord {
-  const value = useContext(ContextoDiscord);
+  const value = useContext(DiscordContext);
   if (!value) throw new Error('useDiscord precisa de <DiscordProvider> acima na árvore.');
   return value;
 }

@@ -11,15 +11,15 @@ import { NextResponse, type NextRequest } from 'next/server';
  *
  * Aqui ainda dá: isto roda antes de qualquer renderização.
  */
-const ID_DE_SERVIDOR = /^\/[0-9]{15,21}$/;
+const GUILD_ID_PATTERN = /^\/[0-9]{15,21}$/;
 
 /** O que existe de verdade na raiz. Rota nova = mais uma entrada aqui. */
-const CONHECIDOS = new Set(['/', '/share', '/termos', '/privacidade']);
+const KNOWN_ROUTES = new Set(['/', '/share', '/termos', '/privacidade']);
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (CONHECIDOS.has(pathname) || ID_DE_SERVIDOR.test(pathname)) return NextResponse.next();
+  if (KNOWN_ROUTES.has(pathname) || GUILD_ID_PATTERN.test(pathname)) return NextResponse.next();
 
   return new NextResponse('Não encontrado.', {
     status: 404,

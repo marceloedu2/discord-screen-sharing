@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { Button } from "./button";
 import { Modal } from "./modal";
-import { PRESETS, PRESET_PADRAO, type Preset } from "@/lib/presets";
+import { PRESETS, DEFAULT_PRESET, type Preset } from "@/lib/presets";
 
 /**
  * As três escolhas antes de qualquer captura (RF-TRX-2).
@@ -18,7 +18,7 @@ import { PRESETS, PRESET_PADRAO, type Preset } from "@/lib/presets";
  */
 export function BroadcastModal({
   adjust = false,
-  currentPreset = PRESET_PADRAO,
+  currentPreset = DEFAULT_PRESET,
   currentSound = false,
   onClose,
   onConfirm,
@@ -30,7 +30,7 @@ export function BroadcastModal({
   onConfirm: (preset: Preset, sound: boolean) => void;
 }) {
   const [preset, setPreset] = useState(currentPreset);
-  const [sound, setSom] = useState(currentSound);
+  const [sound, setSound] = useState(currentSound);
 
   return (
     <Modal
@@ -67,7 +67,7 @@ export function BroadcastModal({
               <span className="flex-1">
                 <span className="block text-[14px] font-medium text-texto">{p.name}</span>
                 <span className="block text-[13px] text-suave">
-                  {p.resumo} · {(p.bitrate / 1_000_000).toLocaleString("pt-BR")} Mb/s
+                  {p.summary} · {(p.bitrate / 1_000_000).toLocaleString("pt-BR")} Mb/s
                 </span>
               </span>
             </label>
@@ -80,11 +80,11 @@ export function BroadcastModal({
           <input
             type="checkbox"
             checked={sound}
-            onChange={(e) => setSom(e.target.checked)}
+            onChange={(e) => setSound(e.target.checked)}
             className="mt-1 accent-acento"
           />
           <span>
-            Compartilhar o sound
+            Compartilhar o som
             <span className="mt-0.5 block text-[13px]">
               Só funciona escolhendo uma aba. Tela inteira traria o som do Discord junto, e a call
               se ouviria em eco.
@@ -99,7 +99,7 @@ export function BroadcastModal({
 
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Cancelar</Button>
-        <Button variant="primario" wide onClick={() => onConfirm(preset, sound)}>
+        <Button variant="primary" wide onClick={() => onConfirm(preset, sound)}>
           {adjust ? "Aplicar" : "Compartilhar tela"}
         </Button>
       </div>

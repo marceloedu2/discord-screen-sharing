@@ -39,13 +39,21 @@ assiste até pedir de novo. Vale para `stream-start` e para reconfiguração.
 
 ## Backpressure
 
-`RN-AST-7` · herdado · P0 — Se o socket de um espectador acumula mais de **2 MB**
-(4 MB para keyframe), o servidor **descarta quadros para essa pessoa** em vez de
-enfileirar. Sem isso, um espectador com internet ruim derruba o processo por
-consumo de memória.
+`RN-AST-7` · alterado · P0 — Se o socket de um espectador acumula mais de
+**400 KB** (800 KB para keyframe), o servidor **descarta quadros para essa
+pessoa** em vez de enfileirar. Sem isso, um espectador com internet ruim
+derruba o processo por consumo de memória.
+
+O valor herdado era 2 MB (4 MB para keyframe) — a 1 Mbps (preset Leve) isso é
+16 s de vídeo enfileirado antes do primeiro descarte, e tudo que sai depois
+daquela fila espera atrás dela, inclusive o `stream-stop` de quem já parou de
+transmitir. 400 KB fica perto de 1 s no preset mais pesado e 3,2 s no mais
+leve — folga o bastante para uma rajada, curto o bastante para o `rewatch` de
+`RN-PRO-20a` entrar enquanto a pessoa ainda está olhando para a tela travada.
 
 Keyframe tem tolerância dobrada de propósito: descartá-lo deixa a pessoa presa
-sem imagem até o próximo.
+sem imagem até o próximo — que agora pode ser pedido de novo (`RF-AST-18a`),
+em vez de só esperar o periódico.
 
 ## Os dois layouts
 

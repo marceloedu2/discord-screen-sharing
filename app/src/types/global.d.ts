@@ -6,7 +6,7 @@
  * atividade abria e só quebrava no login, longe da causa. O Client ID é público
  * por natureza, aparece em toda URL de OAuth; o secret nunca sai do servidor.
  */
-interface DadosDaSala {
+interface RoomWindowData {
   /** null quando DISCORD_CLIENT_ID não está configurado. */
   clientId: string | null;
 }
@@ -16,7 +16,7 @@ interface Window {
    * Ausente só se o HTML não veio deste app — dentro do produto o layout
    * sempre escreve o objeto, mesmo sem credencial configurada.
    */
-  __SALA__?: DadosDaSala;
+  __ROOM__?: RoomWindowData;
 }
 
 /**

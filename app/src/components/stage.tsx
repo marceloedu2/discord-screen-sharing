@@ -1,6 +1,6 @@
 "use client";
 
-import { ocupacaoDe, PersonTile } from "./grid";
+import { occupancyOf, PersonTile } from "./grid";
 import { Screen } from "./screen";
 import type { RoomConnection, RoomSnapshot } from "@/lib/room";
 
@@ -90,7 +90,7 @@ export function Stage({
             isMe={onStage.userId === myId}
             onWatch={() => connection.watch(onStage.slot)}
             onStop={() => connection.unwatch(onStage.slot)}
-            occupancy={ocupacaoDe(onStage.watchers.length)}
+            occupancy={occupancyOf(onStage.watchers.length)}
             connectionQuality={room.quality[onStage.slot]}
             poppedOut={poppedOut === onStage.slot}
             onMenu={(x, y) => onMenu(onStage.slot, onStage.userId, x, y)}

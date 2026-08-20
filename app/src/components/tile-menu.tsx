@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { RoomConnection } from "@/lib/room";
-import { saveVolumeDe } from "@/lib/volume";
+import { saveVolumeFor } from "@/lib/volume";
 
 /**
  * O menu do botão direito num tile de transmissão (RF-AST-8).
@@ -36,7 +36,7 @@ export function TileMenu({
   onStop: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const [volume, setVolume] = useState(() => connection.volumeDe(userId));
+  const [volume, setVolume] = useState(() => connection.volumeFor(userId));
   const [pos, setPos] = useState({ x, y });
 
   useEffect(() => {
@@ -94,8 +94,8 @@ export function TileMenu({
             onChange={(e) => {
               const v = Number(e.target.value);
               setVolume(v);
-              saveVolumeDe(userId, v);
-              connection.setVolumeDe(userId, v);
+              saveVolumeFor(userId, v);
+              connection.setVolumeFor(userId, v);
             }}
             className="w-full accent-acento"
           />

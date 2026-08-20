@@ -15,18 +15,18 @@ import { useEffect } from 'react';
  * Activity o cliente do Discord captura alguns antes de chegarem ao iframe, e o
  * que sobrar funciona. Todos têm botão visível.
  */
-export interface Atalhos {
+export interface Shortcuts {
   fullscreen: () => void;
-  mudo: () => void;
-  modo: () => void;
+  mute: () => void;
+  mode: () => void;
   people: () => void;
-  aoPalco: (indice: number) => void;
-  ajuda: () => void;
+  toStage: (index: number) => void;
+  help: () => void;
 }
 
-export function useAtalhos(ativo: boolean, actions: Atalhos): void {
+export function useShortcuts(active: boolean, actions: Shortcuts): void {
   useEffect(() => {
-    if (!ativo) return;
+    if (!active) return;
 
     const onKey = (e: KeyboardEvent) => {
       // Atalho nunca dispara com foco em campo de texto (RN-UI-9): o apelido
@@ -48,11 +48,11 @@ export function useAtalhos(ativo: boolean, actions: Atalhos): void {
       const key = e.key.toLowerCase();
 
       if (key === 'f') actions.fullscreen();
-      else if (key === 'm') actions.mudo();
-      else if (key === 'g') actions.modo();
+      else if (key === 'm') actions.mute();
+      else if (key === 'g') actions.mode();
       else if (key === 'p') actions.people();
-      else if (key === '?') actions.ajuda();
-      else if (key >= '1' && key <= '4') actions.aoPalco(Number(key) - 1);
+      else if (key === '?') actions.help();
+      else if (key >= '1' && key <= '4') actions.toStage(Number(key) - 1);
       else return;
 
       e.preventDefault();
@@ -60,5 +60,5 @@ export function useAtalhos(ativo: boolean, actions: Atalhos): void {
 
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [ativo, actions]);
+  }, [active, actions]);
 }

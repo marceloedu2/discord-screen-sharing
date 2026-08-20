@@ -8,31 +8,31 @@
  * para quem quiser (RN-TRX-35).
  */
 export interface Preset {
-  id: 'leve' | 'boa' | 'alta' | 'maxima';
+  id: 'light' | 'good' | 'high' | 'max';
   name: string;
   /** Teto de altura; a redução é proporcional, nunca corta (RN-TRX-36). */
   maxHeight: number;
   fps: number;
   bitrate: number;
-  resumo: string;
+  summary: string;
 }
 
 export const PRESETS: readonly Preset[] = [
-  { id: 'leve', name: 'Leve', maxHeight: 720, fps: 15, bitrate: 1_000_000, resumo: '720p · 15 fps' },
-  { id: 'boa', name: 'Boa', maxHeight: 1080, fps: 30, bitrate: 2_500_000, resumo: '1080p · 30 fps' },
-  { id: 'alta', name: 'Alta', maxHeight: 1080, fps: 60, bitrate: 5_000_000, resumo: '1080p · 60 fps' },
+  { id: 'light', name: 'Leve', maxHeight: 720, fps: 15, bitrate: 1_000_000, summary: '720p · 15 fps' },
+  { id: 'good', name: 'Boa', maxHeight: 1080, fps: 30, bitrate: 2_500_000, summary: '1080p · 30 fps' },
+  { id: 'high', name: 'Alta', maxHeight: 1080, fps: 60, bitrate: 5_000_000, summary: '1080p · 60 fps' },
   {
-    id: 'maxima',
+    id: 'max',
     name: 'Máxima',
     maxHeight: 1080,
     fps: 60,
     bitrate: 8_000_000,
-    resumo: '1080p · 60 fps',
+    summary: '1080p · 60 fps',
   },
 ];
 
 /** O padrão é "Boa" (RF-TRX-2). */
-export const PRESET_PADRAO = PRESETS[1] as Preset;
+export const DEFAULT_PRESET = PRESETS[1] as Preset;
 
-export const presetDe = (id: string | null): Preset =>
-  PRESETS.find((p) => p.id === id) ?? PRESET_PADRAO;
+export const presetOf = (id: string | null): Preset =>
+  PRESETS.find((p) => p.id === id) ?? DEFAULT_PRESET;

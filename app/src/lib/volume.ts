@@ -33,7 +33,7 @@ export function readVolumes(): Map<string, number> {
  * "nunca foi mexido", e é o que mantém o armazenamento pequeno depois de muita
  * gente passar pela sala.
  */
-export function saveVolumeDe(userId: string, value: number): Map<string, number> {
+export function saveVolumeFor(userId: string, value: number): Map<string, number> {
   const all = readVolumes();
   if (value === 1) all.delete(userId);
   else all.set(userId, value);

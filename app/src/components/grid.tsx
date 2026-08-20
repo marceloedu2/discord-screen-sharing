@@ -3,7 +3,7 @@
 import { Avatar } from "./avatar";
 import { Screen } from "./screen";
 import type { RoomConnection, RoomSnapshot } from "@/lib/room";
-import { TETO_ESPECTADORES, type Person } from "@/lib/types";
+import { MAX_VIEWERS_PER_STREAM, type Person } from "@/lib/types";
 
 /**
  * A grade — todo mundo em células iguais, telas e pessoas juntas.
@@ -53,7 +53,10 @@ export function Grid({
   if (total === 0) return null;
 
   return (
-    <div className={`grid h-full w-full gap-grade p-respiro ${columns(total)}`}>
+    // `auto-rows-fr`: sem isto as fileiras se dimensionam pelo conteúdo, e a que
+    // tem vídeo estica enquanto a de avatares encolhe — na captura, 590px contra
+    // 160px. Todo mundo do mesmo tamanho é o que a grade promete.
+    <div className={`grid h-full w-full auto-rows-fr gap-grade p-respiro ${columns(total)}`}>
       {/* Telas primeiro, pessoas depois: tela é o que se olha, pessoa é o que
           se confere (RN-AST-10). */}
       {room.streams.map((s) => (
@@ -75,7 +78,7 @@ export function Grid({
             isMe={s.userId === myId}
             onWatch={() => connection.watch(s.slot)}
             onStop={() => connection.unwatch(s.slot)}
-            occupancy={ocupacaoDe(s.watchers.length)}
+            occupancy={occupancyOf(s.watchers.length)}
             connectionQuality={room.quality[s.slot]}
             poppedOut={poppedOut === s.slot}
             onMenu={(x, y) => onMenu(s.slot, s.userId, x, y)}
@@ -92,8 +95,8 @@ export function Grid({
 }
 
 /** Só mostra a partir de 75% do teto: antes disso é ruído (RF-AST-12). */
-export function ocupacaoDe(quantos: number): string | null {
-  return quantos >= TETO_ESPECTADORES * 0.75 ? `${quantos}/${TETO_ESPECTADORES}` : null;
+export function occupancyOf(count: number): string | null {
+  return count >= MAX_VIEWERS_PER_STREAM * 0.75 ? `${count}/${MAX_VIEWERS_PER_STREAM}` : null;
 }
 
 /**
@@ -138,7 +141,7 @@ export function PersonTile({
           (compact ? "px-1.5 py-0.5" : "px-2 py-1")
         }
       >
-        <span className={`truncate font-medium text-text ${compact ? "text-[11px]" : "text-[13px]"}`}>
+        <span className={`truncate font-medium text-texto ${compact ? "text-[11px]" : "text-[13px]"}`}>
           {person.name}
           {isMe ? " (você)" : ""}
         </span>

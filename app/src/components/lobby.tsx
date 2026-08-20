@@ -7,7 +7,7 @@ import { Modal } from "./modal";
 import { MAX_ROOM_NAME, normalizeName } from "@/lib/name";
 import type { RoomSummary } from "@/lib/types";
 
-const CAMPO =
+const FIELD =
   "w-full rounded-md border border-linha bg-[#111214] px-2.5 py-2 text-texto" +
   " focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acento";
 
@@ -53,7 +53,7 @@ export function Lobby({
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-respiro py-8">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-xl font-semibold text-texto">Salas</h1>
-          <Button variant="primario" wide onClick={() => openCreate(true)}>
+          <Button variant="primary" wide onClick={() => openCreate(true)}>
             Criar sala
           </Button>
         </div>
@@ -112,34 +112,34 @@ function CreateModal({
       sub="O nome é opcional. A senha também — sem ela, qualquer pessoa entra."
       onClose={onClose}
     >
-      <label className="mb-1.5 block text-[13.5px] text-suave" htmlFor="nomeSala">
+      <label className="mb-1.5 block text-[13.5px] text-suave" htmlFor="roomName">
         Nome
       </label>
       <input
-        id="nomeSala"
+        id="roomName"
         value={name}
         maxLength={MAX_ROOM_NAME}
         placeholder="Sala de teste"
         onChange={(e) => setName(e.target.value)}
-        className={`${CAMPO} mb-4`}
+        className={`${FIELD} mb-4`}
       />
 
-      <label className="mb-1.5 block text-[13.5px] text-suave" htmlFor="senhaSala">
+      <label className="mb-1.5 block text-[13.5px] text-suave" htmlFor="roomPassword">
         Senha <span className="text-suave">(opcional)</span>
       </label>
       <input
-        id="senhaSala"
+        id="roomPassword"
         type="password"
         value={password}
         autoComplete="new-password"
         onChange={(e) => setPassword(e.target.value)}
-        className={`${CAMPO} mb-5`}
+        className={`${FIELD} mb-5`}
       />
 
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Cancelar</Button>
         <Button
-          variant="primario"
+          variant="primary"
           onClick={() => onCreate(normalizeName(name, MAX_ROOM_NAME), password)}
         >
           Criar
@@ -178,19 +178,19 @@ export function ChangePasswordModal({
       onClose={onClose}
     >
       <input
-        id="novaSenha"
+        id="newPassword"
         type="password"
         value={password}
         autoFocus
         autoComplete="new-password"
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && onSave(password)}
-        className={CAMPO}
+        className={FIELD}
       />
 
       <div className="mt-5 flex justify-end gap-2">
         <Button onClick={onClose}>Cancelar</Button>
-        <Button variant="primario" onClick={() => onSave(password)}>
+        <Button variant="primary" onClick={() => onSave(password)}>
           Salvar
         </Button>
       </div>
@@ -221,21 +221,21 @@ export function PasswordModal({
   return (
     <Modal title={room.name} sub="Esta sala pede senha." onClose={onClose}>
       <input
-        id="senhaEntrar"
+        id="enterPassword"
         type="password"
         value={password}
         autoFocus
         autoComplete="current-password"
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && onSubmit(password)}
-        className={CAMPO}
+        className={FIELD}
       />
 
       {error ? <p className="mt-2 text-[13.5px] text-perigo">{error}</p> : null}
 
       <div className="mt-5 flex justify-end gap-2">
         <Button onClick={onClose}>Cancelar</Button>
-        <Button variant="primario" onClick={() => onSubmit(password)}>
+        <Button variant="primary" onClick={() => onSubmit(password)}>
           Entrar
         </Button>
       </div>

@@ -126,7 +126,7 @@ function handleViewer(ws: WebSocket, room: Room, info: Person): void {
   rooms.attachViewer(room, ws, info);
 
   /** Clicou em sair, e não simplesmente perdeu a conexão. */
-  let saiuDeProposito = false;
+  let leftOnPurpose = false;
 
   ws.on('message', (data: RawData, isBinary: boolean) => {
     if (isBinary) return;
@@ -151,11 +151,19 @@ function handleViewer(ws: WebSocket, room: Room, info: Person): void {
       return;
     }
 
+    // O cliente pediu de novo porque travou — sem keyframe novo ou sem
+    // desenhar há um tempo (RF-AST-18a). Diferente de 'watch', não exige que
+    // ainda não esteja assistindo: é assim que ele se recupera.
+    if (msg.type === 'rewatch' && Number.isInteger(msg.slot)) {
+      rooms.rewatch(room, ws, msg.slot as number);
+      return;
+    }
+
     // Saiu de propósito. Marca a intenção antes de o socket fechar: é ela que
     // separa "clicou em sair" de "a conexão caiu", e as duas pedem tratamentos
     // opostos na hora de fechar a sala (RN-SAL-20a).
     if (msg.type === 'leave') {
-      saiuDeProposito = true;
+      leftOnPurpose = true;
       return;
     }
 
@@ -174,7 +182,7 @@ function handleViewer(ws: WebSocket, room: Room, info: Person): void {
     rooms.detachViewer(room, ws);
     // Última pessoa saindo por vontade própria: a sala vai embora agora. Quem
     // caiu continua com a carência do varredor, que existe para o F5.
-    if (saiuDeProposito) rooms.closeIfEmpty(room);
+    if (leftOnPurpose) rooms.closeIfEmpty(room);
   });
   ws.on('error', () => rooms.detachViewer(room, ws));
 }

@@ -28,7 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   // RN-SES-4: o Client ID chega ao navegador pelo HTML, não pelo bundle. O `||`
   // é de propósito: variável vazia no .env chega como string vazia, e o
   // contrato é null para "não configurado".
-  const room: DadosDaSala = { clientId: process.env.DISCORD_CLIENT_ID || null };
+  const room: RoomWindowData = { clientId: process.env.DISCORD_CLIENT_ID || null };
 
   return (
     <html lang="pt-BR" className="h-full antialiased">
@@ -41,7 +41,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.__SALA__=${JSON.stringify(room).replace(/</g, "\\u003c")}`,
+            __html: `window.__ROOM__=${JSON.stringify(room).replace(/</g, "\\u003c")}`,
           }}
         />
 

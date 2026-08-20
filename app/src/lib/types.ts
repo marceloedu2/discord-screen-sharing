@@ -62,7 +62,7 @@ export interface StreamState {
 }
 
 /** O teto por transmissão que o servidor aplica (RF-AST-11). */
-export const TETO_ESPECTADORES = 12;
+export const MAX_VIEWERS_PER_STREAM = 12;
 
 /** A mensagem `state`: sala, participantes e transmissões vivas. */
 export interface StateMessage {

@@ -10,9 +10,9 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
  * Fora de tela cheia nunca some (`RN-UI-12`): ali a barra convive com a grade,
  * e recolher mudaria a altura do conteúdo a cada movimento do mouse.
  */
-const ESPERA_MS = 3000;
+const IDLE_MS = 3000;
 
-const CONSULTA = '(prefers-reduced-motion: reduce)';
+const QUERY = '(prefers-reduced-motion: reduce)';
 
 /**
  * "Esta pessoa pediu menos movimento?", assinado em vez de lido num efeito.
@@ -20,21 +20,21 @@ const CONSULTA = '(prefers-reduced-motion: reduce)';
  * Um elemento que aparece e some é movimento, e a preferência pode mudar com a
  * página aberta.
  */
-function useMovimentoReduzido(): boolean {
+function useReducedMotion(): boolean {
   return useSyncExternalStore(
-    (avisar) => {
-      const mq = window.matchMedia(CONSULTA);
-      mq.addEventListener('change', avisar);
-      return () => mq.removeEventListener('change', avisar);
+    (notify) => {
+      const mq = window.matchMedia(QUERY);
+      mq.addEventListener('change', notify);
+      return () => mq.removeEventListener('change', notify);
     },
-    () => window.matchMedia(CONSULTA).matches,
+    () => window.matchMedia(QUERY).matches,
     () => false
   );
 }
 
-export function useControlesVisiveis(fullscreen: boolean): boolean {
-  const reduced = useMovimentoReduzido();
-  const [idle, setOcioso] = useState(false);
+export function useControlsVisible(fullscreen: boolean): boolean {
+  const reduced = useReducedMotion();
+  const [idle, setIdle] = useState(false);
 
   useEffect(() => {
     if (!fullscreen || reduced) return;
@@ -42,24 +42,24 @@ export function useControlesVisiveis(fullscreen: boolean): boolean {
     let timer: ReturnType<typeof setTimeout>;
 
     const postpone = () => {
-      setOcioso(false);
+      setIdle(false);
       clearTimeout(timer);
       timer = setTimeout(() => {
         // Sumir sob o foco de quem navega por Tab é perder a pessoa dentro da
         // própria interface (RN-UI-11), então o foco dentro da barra a segura.
-        setOcioso(!document.activeElement?.closest('[data-controles]'));
-      }, ESPERA_MS);
+        setIdle(!document.activeElement?.closest('[data-controls]'));
+      }, IDLE_MS);
     };
 
     postpone();
-    for (const evento of ['pointermove', 'keydown', 'pointerdown'] as const) {
-      window.addEventListener(evento, postpone);
+    for (const event of ['pointermove', 'keydown', 'pointerdown'] as const) {
+      window.addEventListener(event, postpone);
     }
 
     return () => {
       clearTimeout(timer);
-      for (const evento of ['pointermove', 'keydown', 'pointerdown'] as const) {
-        window.removeEventListener(evento, postpone);
+      for (const event of ['pointermove', 'keydown', 'pointerdown'] as const) {
+        window.removeEventListener(event, postpone);
       }
     };
   }, [fullscreen, reduced]);

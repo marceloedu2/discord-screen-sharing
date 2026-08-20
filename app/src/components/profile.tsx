@@ -31,9 +31,9 @@ export function Profile({
   onLogout?: (() => void) | undefined;
   onClose: () => void;
 }) {
-  const [name, setNome] = useState(user.name);
+  const [name, setName] = useState(user.name);
 
-  function salvar() {
+  function save() {
     const clean = normalizeName(name);
     // Nome vazio depois da normalização é ignorado — não zera o anterior
     // (RN-SES-14).
@@ -56,15 +56,15 @@ export function Profile({
         </div>
       </div>
 
-      <label className="mb-1.5 block text-[13.5px] text-suave" htmlFor="apelido">
+      <label className="mb-1.5 block text-[13.5px] text-suave" htmlFor="nickname">
         Nome exibido
       </label>
       <input
-        id="apelido"
+        id="nickname"
         value={name}
         maxLength={MAX_NAME}
-        onChange={(e) => setNome(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && salvar()}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && save()}
         className="mb-5 w-full rounded-md border border-linha bg-[#111214] px-2.5 py-2 text-texto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acento"
       />
 
@@ -72,12 +72,12 @@ export function Profile({
         {/* Sair volta a pessoa para convidado — a sessão do Discord fica
             guardada por 30 dias, e este é o caminho de desfazer isso. */}
         {onLogout ? (
-          <Button variant="encerrar" onClick={onLogout} className="mr-auto">
+          <Button variant="end" onClick={onLogout} className="mr-auto">
             Sair da conta
           </Button>
         ) : null}
         <Button onClick={onClose}>Cancelar</Button>
-        <Button variant="primario" onClick={salvar}>
+        <Button variant="primary" onClick={save}>
           Salvar
         </Button>
       </div>

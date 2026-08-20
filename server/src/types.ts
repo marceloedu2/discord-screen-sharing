@@ -38,7 +38,7 @@ export interface Viewer {
   /** Slots de que já recebeu keyframe — delta em decoder frio só dá erro. */
   primed: Set<number>;
   /** Quando avisamos desta pessoa sobre descarte pela última vez (RF-AST-18). */
-  avisadoEm?: number;
+  notifiedAt?: number;
 }
 
 export interface PasswordHash {

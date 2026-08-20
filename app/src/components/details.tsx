@@ -24,12 +24,12 @@ export function Details({
   slot: number | null;
   onClose: () => void;
 }) {
-  const [data, setDados] = useState<ReturnType<RoomConnection["diagnostico"]>>(null);
-  const [test, setTeste] = useState<string | null>(null);
+  const [data, setData] = useState<ReturnType<RoomConnection["diagnostics"]>>(null);
+  const [test, setTest] = useState<string | null>(null);
 
   useEffect(() => {
     if (slot === null) return;
-    const read = () => setDados(connection.diagnostico(slot));
+    const read = () => setData(connection.diagnostics(slot));
     read();
     const t = setInterval(read, 1000);
     return () => clearInterval(t);
@@ -54,11 +54,11 @@ export function Details({
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-        <Linha label="Transmitindo" value={onAir.length ? onAir.join(", ") : "ninguém"} />
-        <Linha label="Latência" value={data ? `${Math.round(data.lag)} ms` : "—"} />
-        <Linha label="Quadros" value={data ? `${data.fps}/s` : "—"} />
-        <Linha label="Resolução" value={data ? data.video : "—"} />
-        <Linha label="Som" value={data ? textoDoSom(data) : "—"} />
+        <Row label="Transmitindo" value={onAir.length ? onAir.join(", ") : "ninguém"} />
+        <Row label="Latência" value={data ? `${Math.round(data.lag)} ms` : "—"} />
+        <Row label="Quadros" value={data ? `${data.fps}/s` : "—"} />
+        <Row label="Resolução" value={data ? data.video : "—"} />
+        <Row label="Som" value={data ? soundText(data) : "—"} />
       </dl>
 
       {/* O diagnóstico manual de RF-TRX-1: se um dia o Discord conceder
@@ -66,7 +66,7 @@ export function Details({
           sumir sozinho. */}
       <Button
         className="mt-4 w-full"
-        onClick={() => void testarCaptura().then(setTeste)}
+        onClick={() => void testCapture().then(setTest)}
       >
         Testar captura no iframe
       </Button>
@@ -75,7 +75,7 @@ export function Details({
   );
 }
 
-function Linha({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <>
       <dt className="text-suave">{label}</dt>
@@ -87,7 +87,7 @@ function Linha({ label, value }: { label: string; value: string }) {
 }
 
 /** Os quatro estados de RN-AST-24. */
-function textoDoSom(d: { sound: string; volume: number }): string {
+function soundText(d: { sound: string; volume: number }): string {
   if (d.sound === "sem") return "a transmissão não tem áudio";
   if (d.sound === "aguardando") return "aguardando o áudio…";
   if (d.sound === "mudo") return "silenciado aqui";
@@ -100,7 +100,7 @@ function textoDoSom(d: { sound: string; volume: number }): string {
  * `NotAllowedError` instantâneo é a política do iframe; demorado é alguém que
  * viu o seletor e desistiu (RN-TRX-2).
  */
-async function testarCaptura(): Promise<string> {
+async function testCapture(): Promise<string> {
   const blocker = supportError({});
   if (blocker) return blocker;
 

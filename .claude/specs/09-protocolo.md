@@ -97,6 +97,7 @@ sockets mortos. Sem isso o contador de espectadores mente.
 |---|---|---|
 | `watch` | `{ slot }` | Passa a receber os quadros daquele slot |
 | `unwatch` | `{ slot }` | Para de receber |
+| `rewatch` | `{ slot }` | Pede keyframe + config de novo, para quem **já assiste** |
 | `rename` | `{ name }` | Troca o nome exibido |
 | `stop-broadcast` | — | Pede ao servidor que encerre **a própria** transmissão |
 | `leave` | — | Avisa que está saindo de propósito, e não caindo |
@@ -116,12 +117,22 @@ sockets mortos. Sem isso o contador de espectadores mente.
 | `error` | `{ message }` | recusa (limite de slots, já transmitindo, tela lotada) |
 | `dropped` | `{ slot }` | descarte por backpressure, ao espectador afetado |
 
-`RN-PRO-20` · novo · P2 — O `dropped` é a única adição ao protocolo herdado, e
-ela é de mão única: o servidor avisa, o cliente não responde. Existe porque sem
-ele o indicador de qualidade (`RF-AST-17`) não distingue rede de quem assiste de
-rede de quem transmite — que é justamente a pergunta que se faz nessa hora. Vai
-espaçado em 2 s por espectador: um aviso por quadro perdido seriam dezenas por
-segundo, no mesmo socket que já não dá conta.
+`RN-PRO-20` · novo · P2 — O `dropped` foi a primeira adição ao protocolo
+herdado. Existe porque sem ele o indicador de qualidade (`RF-AST-17`) não
+distingue rede de quem assiste de rede de quem transmite — que é justamente a
+pergunta que se faz nessa hora. Vai espaçado em 2 s por espectador: um aviso
+por quadro perdido seriam dezenas por segundo, no mesmo socket que já não dá
+conta. Cobria só keyframe e áudio; o descarte de delta (o mais comum — é ele
+que trava a imagem no meio de uma transmissão) não avisava ninguém.
+
+`RN-PRO-20a` · novo · P2 — O `dropped` deixou de ser de mão única: agora o
+cliente responde com `rewatch` quando passa `STALL_MS` (1,2 s) sem desenhar um
+quadro enquanto os avisos continuam chegando (RF-AST-18a). Sem isto, quem
+perdia o keyframe do `watch()` inicial — ou sofria um descarte no meio da
+transmissão — ficava preso esperando o próximo keyframe periódico do
+transmissor (a cada 3 s), ou para sempre, se aquele também fosse descartado. O
+`rewatch` é idempotente e não mexe em `watching`: pode ser pedido quantas vezes
+precisar, sem reemitir o estado da sala.
 
 `RN-PRO-16` · herdado · P0 — `stop-broadcast` só encerra a transmissão **de quem
 pediu**, resolvida por `uid`. Ninguém derruba a tela de outra pessoa.

@@ -7,16 +7,16 @@ import type { ReactNode } from "react";
  * Discord. As medidas vêm de client/src/style.css (spec 02): 13px peso 500,
  * raio 999px, ícone traçado com stroke-width 2.
  *
- * `lista` é o conteúdo que aparece ao passar o mouse — a plateia de um tile,
+ * `list` é o conteúdo que aparece ao passar o mouse — a plateia de um tile,
  * por exemplo. `position: relative` na pílula é o que a ancora.
  */
 export function Pill({
   children,
-  lista,
+  list,
   className = "",
 }: {
   children: ReactNode;
-  lista?: ReactNode;
+  list?: ReactNode;
   className?: string;
 }) {
   return (
@@ -30,9 +30,9 @@ export function Pill({
       }
     >
       {children}
-      {lista ? (
+      {list ? (
         <span className="pointer-events-none absolute bottom-full left-0 mb-2 hidden min-w-max rounded-lg border border-linha bg-black/85 px-3 py-2 backdrop-blur-[10px] group-hover:block">
-          {lista}
+          {list}
         </span>
       ) : null}
     </span>

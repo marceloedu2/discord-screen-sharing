@@ -34,26 +34,26 @@ export function Group({ children }: { children: ReactNode }) {
 /**
  * Um botão redondo da barra.
  *
- * `estado` segue as cores que o Discord usa: neutro é escuro, `ativo` é verde
- * (a ação está ligada) e `encerrar` é o vermelho do desligar chamada.
+ * `state` segue as cores que o Discord usa: neutral é escuro, `active` é verde
+ * (a ação está ligada) e `end` é o vermelho do desligar chamada.
  */
 export function RoundButton({
   label,
-  state = "neutro",
+  state = "neutral",
   wide = false,
   onClick,
   children,
 }: {
   label: string;
-  state?: "neutro" | "ativo" | "encerrar";
+  state?: "neutral" | "active" | "end";
   wide?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
-  const cores = {
-    neutro: "bg-tile text-texto hover:bg-tile-hover",
-    ativo: "bg-vivo text-white hover:brightness-110",
-    encerrar: "bg-perigo text-white hover:bg-perigo-hover",
+  const colors = {
+    neutral: "bg-tile text-texto hover:bg-tile-hover",
+    active: "bg-vivo text-white hover:brightness-110",
+    end: "bg-perigo text-white hover:bg-perigo-hover",
   }[state];
 
   return (
@@ -64,7 +64,7 @@ export function RoundButton({
       title={label}
       className={
         "grid h-[46px] place-items-center rounded-full transition-colors" +
-        ` ${wide ? "min-w-[62px] px-4" : "w-[46px]"} ${cores}` +
+        ` ${wide ? "min-w-[62px] px-4" : "w-[46px]"} ${colors}` +
         " focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto" +
         " [&_svg]:size-[21px] [&_svg]:fill-none [&_svg]:stroke-current" +
         " [&_svg]:[stroke-width:1.8] [&_svg]:[stroke-linecap:round] [&_svg]:[stroke-linejoin:round]"
@@ -88,55 +88,55 @@ export const Icon = {
       <path d="M8 21h8M12 17v4" />
     </svg>
   ),
-  Parar: () => (
+  Stop: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="2" y="4" width="20" height="13" rx="2" />
       <path d="M8 21h8M12 17v4M4 3l16 16" />
     </svg>
   ),
-  Som: () => (
+  Sound: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 9v6h4l5 4V5L8 9H4z" />
       <path d="M17 9a4 4 0 0 1 0 6" />
     </svg>
   ),
-  Mudo: () => (
+  Muted: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 9v6h4l5 4V5L8 9H4z" />
       <path d="M17 9l4 6M21 9l-4 6" />
     </svg>
   ),
-  Sair: () => (
+  Leave: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M3 11c5-4 13-4 18 0l-2.5 3-3.5-1v-2.5a12 12 0 0 0-6 0V13l-3.5 1L3 11z" />
     </svg>
   ),
-  Mais: () => (
+  More: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="5" cy="12" r="1.4" />
       <circle cx="12" cy="12" r="1.4" />
       <circle cx="19" cy="12" r="1.4" />
     </svg>
   ),
-  Pessoas: () => (
+  People: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M22 20v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   ),
-  Destacar: () => (
+  Popout: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M14 4h6v6M20 4l-8 8" />
       <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
     </svg>
   ),
-  TelaCheia: () => (
+  Fullscreen: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
     </svg>
   ),
-  SairTelaCheia: () => (
+  ExitFullscreen: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
     </svg>

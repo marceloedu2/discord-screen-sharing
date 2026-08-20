@@ -3,7 +3,14 @@
 import { useEffect } from "react";
 
 /**
- * O aviso passageiro, encostado acima do dock.
+ * O aviso passageiro, no canto superior direito, abaixo do cabeçalho.
+ *
+ * Ele já foi encostado acima do dock — bem em cima dos controles e do palco,
+ * que é onde a pessoa está olhando quando alguém começa a transmitir. O canto
+ * é o lugar que menos carrega informação da tela (mesmo raciocínio do selo
+ * "AO VIVO" no tile), e "de erro" e "de sistema" compartilham o canto: são a
+ * mesma fila, e a pessoa não precisa vasculhar dois lugares para saber por que
+ * algo mudou.
  *
  * `role="status"` com `aria-live="polite"` porque é informação que chega sem a
  * pessoa ter pedido: um leitor de tela anuncia quando terminar o que está
@@ -39,7 +46,12 @@ export function Toast({
       role="status"
       aria-live="polite"
       className={
-        "fixed bottom-6 left-1/2 z-10 max-w-[min(440px,calc(100vw-32px))] -translate-x-1/2" +
+        // `top-[68px]`: os 52px do cabeçalho mais um respiro — não os
+        // `right-*`/`top-*` do chip "AO VIVO" do tile, que é outro canto e
+        // mora atrás do palco. Em tela cheia o cabeçalho recolhe (h-0), e o
+        // aviso sobra com uma folga em cima em vez de colar nele; folga é
+        // menos ruim que sobrepor.
+        "fixed top-[68px] right-4 z-10 max-w-[min(380px,calc(100vw-32px))]" +
         " rounded-lg border bg-[#111214] px-4 py-[11px] text-[13.5px]/[1.45]" +
         " shadow-[0_8px_24px_rgba(0,0,0,0.45)]" +
         (error ? " border-perigo text-[#ffb3b6]" : " border-linha text-texto")

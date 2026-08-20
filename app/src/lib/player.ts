@@ -32,7 +32,11 @@ export interface Player {
 
 export function createPlayer(
   canvas: HTMLCanvasElement,
-  { onError, onTamanho }: { onError?: (m: string) => void; onTamanho?: () => void } = {}
+  {
+    onError,
+    onSize,
+    onFrame,
+  }: { onError?: (m: string) => void; onSize?: () => void; onFrame?: () => void } = {}
 ): Player {
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 
@@ -43,16 +47,16 @@ export function createPlayer(
   // Quem espera precisa saber quando a espera acabou: entre pedir para assistir
   // e o primeiro quadro cabe um keyframe inteiro de atraso, e o canvas preto
   // desse intervalo é idêntico a um travamento (RF-AST-5).
-  let virgem = true;
+  let pristine = true;
 
   function draw(frame: VideoFrame): void {
     // Buffer no tamanho nativo do vídeo: é isso que define a proporção
     // intrínseca do elemento, e é o que impede o CSS de distorcer.
-    let mudou = false;
+    let changed = false;
     if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
       canvas.width = frame.displayWidth;
       canvas.height = frame.displayHeight;
-      mudou = true;
+      changed = true;
     }
 
     ctx?.drawImage(frame, 0, 0, canvas.width, canvas.height);
@@ -60,12 +64,15 @@ export function createPlayer(
     // VideoFrame segura memória de GPU; sem close() a aba trava em segundos.
     frame.close();
     framesDrawn++;
+    // Todo quadro que chega a desenhar, não só o primeiro: é o pulso que o
+    // vigia de travamento (RoomConnection) usa para saber que ainda está vivo.
+    onFrame?.();
 
     // Avisa no primeiro quadro e sempre que a resolução muda: quem desenha o
     // palco precisa das duas coisas — tirar o "Conectando…" e refazer a forma.
-    if (virgem || mudou) {
-      virgem = false;
-      onTamanho?.();
+    if (pristine || changed) {
+      pristine = false;
+      onSize?.();
     }
   }
 

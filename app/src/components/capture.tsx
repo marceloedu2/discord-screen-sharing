@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useSearchParams } from "next/navigation";
 
 import { Button } from "./button";
-import { PRESETS, presetDe, type Preset } from "@/lib/presets";
+import { PRESETS, presetOf, type Preset } from "@/lib/presets";
 import {
   createBroadcaster,
   supportError,
@@ -29,11 +29,11 @@ export function Capture() {
   const [notice, setNotice] = useState<string | null>(null);
   const [status, setStatus] = useState<BroadcastStatus | null>(null);
   const [stats, setStats] = useState<BroadcastStats | null>(null);
-  const [onAir, setNoAr] = useState(false);
-  const [soundBlocked, setSomBloqueado] = useState(false);
-  const [hasSound, setTemSom] = useState(false);
+  const [onAir, setOnAir] = useState(false);
+  const [soundBlocked, setSoundBlocked] = useState(false);
+  const [hasSound, setHasSound] = useState(false);
   const [preset, setPreset] = useState<Preset | null>(null);
-  const [preview, setPrevia] = useState<{ width: number; height: number; hasSound: boolean } | null>(
+  const [preview, setPreview] = useState<{ width: number; height: number; hasSound: boolean } | null>(
     null
   );
   const previewCanvas = useRef<HTMLCanvasElement>(null);
@@ -60,8 +60,8 @@ export function Capture() {
       // Os padrões são os da spec: Boa, 2,5 Mbps, 30 fps (RF-TRX-2).
       bitrate: Number(params.get("q")) || 2_500_000,
       fps: Number(params.get("fps")) || 30,
-      som: params.get("som") === "1",
-      preset: presetDe(params.get("preset")),
+      sound: params.get("sound") === "1",
+      preset: presetOf(params.get("preset")),
     }),
     [params]
   );
@@ -86,15 +86,15 @@ export function Capture() {
       bitrate: opts.bitrate,
       fps: opts.fps,
       maxHeight: opts.preset.maxHeight,
-      audio: opts.som,
+      audio: opts.sound,
       onStatus: setStatus,
       onStats: setStats,
-      onAviso: setNotice,
+      onNotice: setNotice,
       onEnd: (reason) => {
-        setNoAr(false);
+        setOnAir(false);
         setStats(null);
-        setSomBloqueado(false);
-        setTemSom(false);
+        setSoundBlocked(false);
+        setHasSound(false);
         if (reason) setNotice(reason);
       },
     });
@@ -103,9 +103,9 @@ export function Capture() {
     try {
       // O clique É o gesto de usuário que getDisplayMedia exige; qualquer await
       // antes dele o invalida (RN-TRX-6).
-      const p = await b.preparar();
-      setPrevia({ width: p.width, height: p.height, hasSound: p.hasSound });
-      setSomBloqueado(p.soundBlocked);
+      const p = await b.prepare();
+      setPreview({ width: p.width, height: p.height, hasSound: p.hasSound });
+      setSoundBlocked(p.soundBlocked);
       setPreset(opts.preset);
     } catch (err) {
       broadcaster.current = null;
@@ -119,9 +119,9 @@ export function Capture() {
   const goLive = useCallback(async () => {
     try {
       await broadcaster.current?.goLive();
-      setPrevia(null);
-      setNoAr(true);
-      setTemSom(broadcaster.current?.hasSound() ?? false);
+      setPreview(null);
+      setOnAir(true);
+      setHasSound(broadcaster.current?.hasSound() ?? false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não consegui entrar no ar.");
     }
@@ -130,8 +130,8 @@ export function Capture() {
   const discard = useCallback(() => {
     broadcaster.current?.stop();
     broadcaster.current = null;
-    setPrevia(null);
-    setSomBloqueado(false);
+    setPreview(null);
+    setSoundBlocked(false);
   }, []);
 
   const stopBroadcast = useCallback(() => broadcaster.current?.stop(), []);
@@ -144,9 +144,9 @@ export function Capture() {
   const tabSound = useCallback(async () => {
     setError(null);
     try {
-      await broadcaster.current?.trocarSom();
-      setSomBloqueado(false);
-      setTemSom(true);
+      await broadcaster.current?.swapSound();
+      setSoundBlocked(false);
+      setHasSound(true);
       setNotice("Som ligado, vindo da aba escolhida.");
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") return;
@@ -159,7 +159,7 @@ export function Capture() {
     setError(null);
     try {
       await broadcaster.current?.changeScreen();
-      setSomBloqueado(broadcaster.current?.soundBlocked() ?? false);
+      setSoundBlocked(broadcaster.current?.soundBlocked() ?? false);
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") return;
       setError(err instanceof Error ? err.message : "Não consegui trocar a tela.");
@@ -192,17 +192,17 @@ export function Capture() {
     const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
-    video.srcObject = new MediaStream([broadcaster.current?.faixaPreparada() as MediaStreamTrack]);
+    video.srcObject = new MediaStream([broadcaster.current?.preparedTrack() as MediaStreamTrack]);
     void video.play().catch(() => {});
 
-    const pintar = () => {
+    const paint = () => {
       if (!ctx || !video.videoWidth) return;
       canvas.width = 320;
       canvas.height = Math.round((video.videoHeight / video.videoWidth) * 320);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     };
 
-    const t = setInterval(pintar, 500);
+    const t = setInterval(paint, 500);
     return () => {
       clearInterval(t);
       video.srcObject = null;
@@ -212,9 +212,9 @@ export function Capture() {
   // A aba precisa continuar aberta enquanto a transmissão durar (RF-TRX-4).
   useEffect(() => {
     if (!onAir) return;
-    const avisar = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", avisar);
-    return () => window.removeEventListener("beforeunload", avisar);
+    const blockClose = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", blockClose);
+    return () => window.removeEventListener("beforeunload", blockClose);
   }, [onAir]);
 
   if (!inBrowser) return null;
@@ -249,7 +249,7 @@ export function Capture() {
                 {preview.hasSound ? "com som" : "sem som"}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button variant="primario" wide onClick={() => void goLive()}>
+                <Button variant="primary" wide onClick={() => void goLive()}>
                   Entrar no ar
                 </Button>
                 <Button
@@ -266,11 +266,11 @@ export function Capture() {
 
           <div className="flex items-center gap-3">
             {onAir ? (
-              <Button variant="encerrar" wide onClick={stopBroadcast}>
+              <Button variant="end" wide onClick={stopBroadcast}>
                 Parar de transmitir
               </Button>
             ) : preview ? null : (
-              <Button variant="primario" wide onClick={() => void begin()}>
+              <Button variant="primary" wide onClick={() => void begin()}>
                 Escolher tela e transmitir
               </Button>
             )}
@@ -293,7 +293,7 @@ export function Capture() {
                 A tela inteira carrega o som do Discord junto, e a call se ouviria em eco. Está no
                 ar <strong>sem som</strong>.
               </p>
-              <Button variant="atencao" wide className="mt-3" onClick={() => void tabSound()}>
+              <Button variant="warning" wide className="mt-3" onClick={() => void tabSound()}>
                 Som de uma aba
               </Button>
             </div>
@@ -311,12 +311,12 @@ export function Capture() {
                 Qualidade
                 <select
                   value={preset?.id ?? "boa"}
-                  onChange={(e) => adjustQuality(presetDe(e.target.value))}
+                  onChange={(e) => adjustQuality(presetOf(e.target.value))}
                   className="max-w-[210px] flex-1 rounded-md border border-linha bg-[#111214] px-2.5 py-2 texto-texto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acento"
                 >
                   {PRESETS.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} — {p.resumo}
+                      {p.name} — {p.summary}
                     </option>
                   ))}
                 </select>
@@ -336,14 +336,14 @@ export function Capture() {
 
           {status ? (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
-              <Linha label="Codec" value={status.codec} />
-              <Linha label="Resolução" value={`${status.width}×${status.height}`} />
-              <Linha label="Capture" value={status.direct ? "direta (Chromium)" : "via vídeo"} />
+              <Row label="Codec" value={status.codec} />
+              <Row label="Resolução" value={`${status.width}×${status.height}`} />
+              <Row label="Capture" value={status.direct ? "direta (Chromium)" : "via vídeo"} />
               {stats ? (
                 <>
-                  <Linha label="Assistindo" value={String(stats.viewers)} />
-                  <Linha label="Quadros" value={`${stats.fps}/s`} />
-                  <Linha label="Banda" value={`${stats.mbps.toFixed(1)} Mb/s`} />
+                  <Row label="Assistindo" value={String(stats.viewers)} />
+                  <Row label="Quadros" value={`${stats.fps}/s`} />
+                  <Row label="Banda" value={`${stats.mbps.toFixed(1)} Mb/s`} />
                 </>
               ) : null}
             </dl>
@@ -362,7 +362,7 @@ export function Capture() {
   );
 }
 
-function Linha({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <>
       <dt className="text-suave">{label}</dt>

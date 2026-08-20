@@ -9,7 +9,7 @@ import { read, remove, store } from './storage';
  * Validar aqui exigiria o segredo no navegador, que é o oposto do ponto.
  */
 
-const CHAVE = 'identity';
+const KEY = 'identity';
 
 export type Claims = {
   instance: string;
@@ -47,16 +47,16 @@ export function expired(claims: Claims): boolean {
  * evita a tela parada enquanto ela acontece.
  */
 export function stored(): string | null {
-  const token = read(CHAVE);
+  const token = read(KEY);
   if (!token) return null;
 
   const claims = decode(token);
   if (!claims || expired(claims)) {
-    remove(CHAVE);
+    remove(KEY);
     return null;
   }
   return token;
 }
 
-export const save = (token: string) => store(CHAVE, token);
-export const discard = () => remove(CHAVE);
+export const save = (token: string) => store(KEY, token);
+export const discard = () => remove(KEY);

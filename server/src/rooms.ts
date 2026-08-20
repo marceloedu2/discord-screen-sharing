@@ -38,7 +38,17 @@ const MAX_VIEWERS_PER_STREAM = Number(process.env.MAX_VIEWERS_PER_STREAM) || 12;
 // Sala é objeto em memória criado por qualquer pessoa autenticada: sem teto,
 // um laço de "criar sala" consome a RAM do processo.
 const MAX_ROOMS_PER_INSTANCE = 20;
-const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
+// 2 MB (4 para keyframe) era o valor herdado — e a um bitrate de 1 Mbps
+// (preset Leve) isso é **16 segundos** de vídeo enfileirado antes de o
+// servidor sequer começar a descartar. Enquanto essa fila escoa, tudo que sai
+// depois dela também espera — inclusive o `stream-stop` de quem parou de
+// transmitir, que chega minutos depois de a transmissão já ter acabado
+// (RF-AST-18a). A um bitrate alto (8 Mbps) o mesmo teto vira só 2 s, então o
+// valor bom para um preset é ruim demais para outro. 400 KB fica perto de 1 s
+// no preset mais pesado e de 3,2 s no mais leve — ainda folgado para uma
+// rajada, mas curto o bastante para o descarte (e o resync de RN-AST-3a)
+// entrarem enquanto a pessoa ainda está olhando para a tela travada.
+const MAX_BUFFERED_BYTES = 400 * 1024;
 
 /**
  * Espaçamento do aviso de descarte ao espectador (RF-AST-18).
@@ -48,7 +58,7 @@ const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
  * indicador de qualidade saber que o problema é do lado de quem assiste, e não
  * de quem transmite — que é justamente a pergunta que se faz nessa hora.
  */
-const AVISO_DESCARTE_MS = 2000;
+const DROP_NOTICE_MS = 2000;
 const MAX_NAME = 32;
 const MAX_ROOM_NAME = 40;
 
@@ -288,10 +298,10 @@ function toViewers(room: Room, obj: unknown): void {
  * Antes disto o descarte só incrementava um contador no log, e o indicador de
  * qualidade não distinguia rede de quem assiste de rede de quem transmite.
  */
-function avisarDescarte(viewer: Viewer, slot: number): void {
-  const agora = Date.now();
-  if (agora - (viewer.avisadoEm ?? 0) < AVISO_DESCARTE_MS) return;
-  viewer.avisadoEm = agora;
+function warnDropped(viewer: Viewer, slot: number): void {
+  const now = Date.now();
+  if (now - (viewer.notifiedAt ?? 0) < DROP_NOTICE_MS) return;
+  viewer.notifiedAt = now;
   sendJson(viewer.ws, { type: 'dropped', slot });
 }
 
@@ -454,7 +464,7 @@ export function relayChunk(room: Room, b: Broadcast, chunk: Buffer): void {
     if (isAudio) {
       if (v.ws.bufferedAmount > MAX_BUFFERED_BYTES) {
         room.droppedChunks++;
-        avisarDescarte(v, b.slot);
+        warnDropped(v, b.slot);
         continue;
       }
       v.ws.send(chunk);
@@ -467,7 +477,7 @@ export function relayChunk(room: Room, b: Broadcast, chunk: Buffer): void {
       // pedir de novo.
       if (v.ws.bufferedAmount > MAX_BUFFERED_BYTES * 2) {
         room.droppedChunks++;
-        avisarDescarte(v, b.slot);
+        warnDropped(v, b.slot);
         continue;
       }
       v.ws.send(chunk);
@@ -479,6 +489,12 @@ export function relayChunk(room: Room, b: Broadcast, chunk: Buffer): void {
 
     if (v.ws.bufferedAmount > MAX_BUFFERED_BYTES) {
       room.droppedChunks++;
+      // Faltava aqui (RF-AST-18 só cobria keyframe e áudio): descarte de delta
+      // é o caso mais comum — é ele que trava a imagem no meio de uma
+      // transmissão —, e sem avisar o indicador de qualidade nunca via o
+      // problema, e o cliente não tinha como saber que precisava pedir um
+      // keyframe novo para se recuperar.
+      warnDropped(v, b.slot);
       continue;
     }
     v.ws.send(chunk);
@@ -536,6 +552,31 @@ export function watch(room: Room, ws: WebSocket, slot: number): void {
   // ~1 quadro, e o servidor não precisa segurar buffer de ninguém.
   sendJson(b.ws, { type: 'need-keyframe' });
   broadcastState(room);
+}
+
+/**
+ * Pede um keyframe de novo para quem **já está assistindo** (RF-AST-18a).
+ *
+ * `watch()` só pede uma vez, na entrada — e não existia nada que pedisse de
+ * novo se aquele pedido (ou o próprio keyframe) se perdesse no caminho. Sem
+ * isso, quem caía nesse buraco ficava vendo "Conectando…" para sempre, e quem
+ * já estava assistindo e sofria um descarte no meio da transmissão dependia só
+ * do keyframe periódico do transmissor (a cada 3 s) para voltar a ver algo —
+ * o cliente pede isto sempre que passa um tempo sem desenhar um quadro
+ * enquanto descartes continuam chegando.
+ *
+ * Diferente de `watch()`: não mexe em `watching` nem reemite o estado da sala
+ * — é só um "de novo, por favor" para quem já tinha pedido, então não custa
+ * nada repetir sob demanda.
+ */
+export function rewatch(room: Room, ws: WebSocket, slot: number): void {
+  const viewer = room.viewers.get(ws);
+  const b = room.slots.get(slot);
+  if (!viewer || !b || !b.streaming || !viewer.watching.has(slot)) return;
+
+  if (b.config) sendJson(ws, { type: 'config', slot, config: b.config });
+  if (b.audioConfig) sendJson(ws, { type: 'audio-config', slot, config: b.audioConfig });
+  sendJson(b.ws, { type: 'need-keyframe' });
 }
 
 export function unwatch(room: Room, ws: WebSocket, slot: number): void {

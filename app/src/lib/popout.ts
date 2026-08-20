@@ -32,7 +32,9 @@ export async function popOut(
   const style = pip.document.createElement('style');
   style.textContent =
     'html,body{margin:0;height:100%;background:#000;display:grid;place-items:center}' +
-    'canvas{max-width:100%;max-height:100%}';
+    // `min-width/height:0` pelo mesmo motivo do tile: item de grade nasce com
+    // mínimo de conteúdo, que vence os máximos e faz o canvas transbordar.
+    'canvas{max-width:100%;max-height:100%;min-width:0;min-height:0}';
   pip.document.head.append(style);
   pip.document.body.append(canvas);
 

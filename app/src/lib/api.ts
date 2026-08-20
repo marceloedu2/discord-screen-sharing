@@ -34,7 +34,7 @@ export class ApiError extends Error {
   }
 }
 
-type Corpo = Record<string, unknown>;
+type RequestBody = Record<string, unknown>;
 
 /**
  * `renew` emite uma identidade nova quando o servidor recusa a atual. Quem a
@@ -45,14 +45,14 @@ type Corpo = Record<string, unknown>;
  */
 export async function post<T>(
   url: string,
-  body: Corpo,
+  body: RequestBody,
   options: { retry?: boolean; renew?: () => Promise<string | null> } = {}
 ): Promise<T> {
   const { retry = true, renew } = options;
 
-  let resposta: Response;
+  let response: Response;
   try {
-    resposta = await fetch(url, {
+    response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -66,19 +66,19 @@ export async function post<T>(
     );
   }
 
-  const data: { error?: string } & Record<string, unknown> = await resposta
+  const data: { error?: string } & Record<string, unknown> = await response
     .json()
     .catch(() => ({}));
 
-  if (!resposta.ok) {
-    if (resposta.status === 401 && retry && renew && body.identity) {
+  if (!response.ok) {
+    if (response.status === 401 && retry && renew && body.identity) {
       const fresh = await renew();
       if (fresh) return post<T>(url, { ...body, identity: fresh }, { retry: false });
     }
 
     // O status carrega significado — 403 senha, 429 bloqueio, 404 sala fechou —
     // então vai junto do erro em vez de virar texto.
-    throw new ApiError(data.error ?? `Servidor respondeu ${resposta.status}.`, resposta.status);
+    throw new ApiError(data.error ?? `Servidor respondeu ${response.status}.`, response.status);
   }
 
   return data as T;

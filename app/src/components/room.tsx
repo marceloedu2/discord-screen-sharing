@@ -52,26 +52,26 @@ import {
 } from "@/lib/session";
 import { remove, store } from "@/lib/storage";
 import { readVolume, readVolumes, saveVolume } from "@/lib/volume";
-import { useControlesVisiveis } from "@/lib/controls-visibility";
-import { useAtalhos } from "@/lib/shortcuts";
+import { useControlsVisible } from "@/lib/controls-visibility";
+import { useShortcuts } from "@/lib/shortcuts";
 import { popOut, supported as popoutSupported } from "@/lib/popout";
 import {
-  enterRoom as entrarNativa,
-  nativaAtiva,
-  ouvir as ouvirTelaCheia,
-  sair as sairNativa,
+  enterNative,
+  nativeActive,
+  listen as listenFullscreen,
+  exitNative,
 } from "@/lib/fullscreen";
-import { PRESET_PADRAO } from "@/lib/presets";
-import { iniciarTransmissao } from "@/lib/broadcast";
+import { DEFAULT_PRESET } from "@/lib/presets";
+import { startBroadcast } from "@/lib/broadcast";
 import type { Broadcaster } from "@/lib/broadcaster";
 import { saveBadge } from "@/lib/session";
 import type { RoomSummary, RoomTokens, Session, Person } from "@/lib/types";
 
 /** Recarga do lobby (RF-SAL-4): salas abrem, enchem e fecham enquanto se olha. */
-const RECARGA_MS = 4000;
+const RELOAD_MS = 4000;
 
 /** Sem este vigia, uma espera que não termina fica com cara de "Conectando…" para sempre (RF-SES-8). */
-const DEMORA_MS = 8000;
+const SLOW_MS = 8000;
 
 export function Room({ guild }: { guild?: string } = {}) {
   const { inDiscord, api, ws } = useDiscord();
@@ -146,7 +146,7 @@ export function Room({ guild }: { guild?: string } = {}) {
   const [pinned, setPinned] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [details, setDetails] = useState(false);
-  const controlsVisible = useControlesVisiveis(fullscreen);
+  const controlsVisible = useControlsVisible(fullscreen);
   const [helpOpen, setHelpOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [poppedOut, setPoppedOut] = useState<number | null>(null);
@@ -175,7 +175,21 @@ export function Room({ guild }: { guild?: string } = {}) {
   // durante a renderização é o que o compilador do React proíbe, e o botão
   // precisa do valor justamente ali.
   const mine = useRef<Broadcaster | null>(null);
-  const [onAirLocal, setOnAirLocal] = useState(false);
+  /**
+   * A intenção local sobre estar no ar: `null` = sem opinião, vale o servidor.
+   *
+   * Booleano puro não dá conta porque o botão precisa de duas garantias
+   * opostas. Começando a transmitir, ele não pode piscar de volta para
+   * "Compartilhar" no intervalo até o `state` chegar. Parando, ele não pode
+   * voltar para "Parar de transmitir" — e voltava: a aba de captura só some do
+   * `broadcasting` do servidor depois da ida e volta pelo relay, e o OU com o
+   * estado do servidor ressuscitava o botão. Quem clicava via o clique não
+   * fazer nada e clicava de novo.
+   *
+   * A opinião local vence enquanto existe, e é descartada ao começar uma
+   * transmissão nova — que é quando ela pode ter envelhecido.
+   */
+  const [onAirIntent, setOnAirIntent] = useState<boolean | null>(null);
   // Para onde o botão de silenciar volta: sem isto, desmutar cairia sempre em
   // 100%, ignorando o ajuste que a pessoa tinha feito (RN-AUD-12).
   const volumeBeforeMute = useRef(1);
@@ -185,7 +199,7 @@ export function Room({ guild }: { guild?: string } = {}) {
   // Só alimenta a conexão com o que estava guardado; quem publica o valor para
   // a interface é ela, pelo snapshot.
   useEffect(() => {
-    connection.carregarVolumes(readVolume(), readVolumes());
+    connection.loadVolumes(readVolume(), readVolumes());
   }, [connection]);
 
   /**
@@ -197,17 +211,17 @@ export function Room({ guild }: { guild?: string } = {}) {
    */
   const toggleFullscreen = useCallback(() => {
     void (async () => {
-      if (fullscreen || nativaAtiva()) {
-        if (!(await sairNativa())) setFullscreen(false);
+      if (fullscreen || nativeActive()) {
+        if (!(await exitNative())) setFullscreen(false);
         return;
       }
-      if (!(await entrarNativa())) setFullscreen(true);
+      if (!(await enterNative())) setFullscreen(true);
     })();
   }, [fullscreen]);
 
   // O navegador também entra e sai por conta própria — o Esc, o F11, o botão da
   // barra dele. Assinar o evento mantém o nosso estado honesto.
-  useEffect(() => ouvirTelaCheia(() => setFullscreen(nativaAtiva())), []);
+  useEffect(() => listenFullscreen(() => setFullscreen(nativeActive())), []);
 
   /**
    * `Esc` sai da tela cheia por layout (RF-AST-4).
@@ -239,10 +253,10 @@ export function Room({ guild }: { guild?: string } = {}) {
   const stopMyBroadcast = useCallback(() => {
     mine.current?.stop();
     mine.current = null;
-    setOnAirLocal(false);
+    setOnAirIntent(false);
     // A aba externa tem conexão própria: só o servidor consegue mandá-la parar
     // (RN-TRX-31), e ele encerra a de quem pediu, resolvida por uid (RN-PRO-16).
-    connection.pedirParada();
+    connection.requestStop();
   }, [connection]);
 
   /**
@@ -262,11 +276,11 @@ export function Room({ guild }: { guild?: string } = {}) {
     // O valor é lido **agora**, e não dentro do atualizador: o atualizador roda
     // depois, e a essa altura a ref já teria sido zerada — a tela de "você
     // saiu" ficava sem os tokens e caía no painel de "abrindo a sala".
-    const ultimos = tokensRef.current;
+    const lastTokens = tokensRef.current;
     tokensRef.current = null;
     // Guarda o que já foi resolvido: voltar não precisa consultar o Discord de
     // novo para saber qual é a call.
-    if (guild && ultimos) setEntrada((atual) => atual ?? ultimos);
+    if (guild && lastTokens) setEntrada((current) => current ?? lastTokens);
   }, [connection, stopMyBroadcast, guild]);
 
   /**
@@ -355,12 +369,12 @@ export function Room({ guild }: { guild?: string } = {}) {
     async (identity: string) => {
       if (!guild) return;
       try {
-        const pedida = requestedRoom();
-        const tokens = await guildRoom(api, identity, guild, pedida, renew);
+        const requestedRoomId = requestedRoom();
+        const tokens = await guildRoom(api, identity, guild, requestedRoomId, renew);
         // O servidor pode ter resolvido o apelido desta pessoa naquele servidor
         // do Discord; é por ele que a galera dali a reconhece.
         if (tokens.user) {
-          setSession((atual) => (atual ? { ...atual, user: tokens.user as Person } : atual));
+          setSession((current) => (current ? { ...current, user: tokens.user as Person } : current));
         }
         connect(tokens);
       } catch (err) {
@@ -374,6 +388,70 @@ export function Room({ guild }: { guild?: string } = {}) {
       }
     },
     [guild, api, renew, connect]
+  );
+
+  /**
+   * A sala que o convite pede, em `/?room=<id>` (RF-SAL-8).
+   *
+   * Quem recebe um link espera cair dentro da sala, não no lobby com a lista
+   * aberta para procurar qual delas era. O parâmetro **não dá acesso**: sala
+   * com senha continua pedindo a senha, e o que o link poupa é a garimpagem,
+   * nunca a autorização (RN-SAL-4).
+   *
+   * O `uid` vem por argumento pelo mesmo motivo da identidade em
+   * `joinCallRoom`: no arranque a sessão ainda não chegou ao estado.
+   */
+  const enterLinkedRoom = useCallback(
+    async (identity: string, uid: string) => {
+      const requested = requestedRoom();
+      if (!requested) return;
+
+      // Numa visita seguinte o token guardado entra sem pedir a senha de novo.
+      const stored = storedTokens(requested, uid);
+      if (stored) {
+        connect(stored);
+        return;
+      }
+
+      try {
+        connect(await joinRoom(api, { identity, roomId: requested }, renew));
+      } catch (err) {
+        const status = err instanceof ApiError ? err.status : 0;
+
+        // 403 senha, 429 bloqueio: o modal assume e conclui a entrada. Ele
+        // mostra o nome da sala, que o link não carrega — daí a consulta à
+        // lista. Se ela falhar ou a sala não estiver nela, o modal ainda
+        // funciona: o que ele precisa mesmo é do id.
+        if (status === 403 || status === 429) {
+          const achada = await listRooms(api, identity)
+            .then(({ rooms }) => rooms.find((r) => r.id === requested) ?? null)
+            .catch(() => null);
+          setAskingPassword(
+            achada ?? {
+              id: requested,
+              name: "Sala protegida",
+              owner: "",
+              isCall: false,
+              locked: true,
+              people: 0,
+              streams: 0,
+            }
+          );
+          return;
+        }
+
+        // 404: o convite é de uma sala que já fechou. Tirar o `?room=` da barra
+        // evita que recarregar a página repita o erro para sempre.
+        if (status === 404) {
+          forgetTokens(requested);
+          writeRoomInUrl(null);
+          toast("Essa sala não existe mais.", true);
+          return;
+        }
+        toast(err instanceof Error ? err.message : "Não consegui abrir a sala do convite.", true);
+      }
+    },
+    [api, renew, connect, toast]
   );
 
   useEffect(() => {
@@ -398,7 +476,7 @@ export function Room({ guild }: { guild?: string } = {}) {
    */
   useEffect(() => {
     let alive = true;
-    const watchdog = setTimeout(() => alive && setSlow(true), DEMORA_MS);
+    const watchdog = setTimeout(() => alive && setSlow(true), SLOW_MS);
 
     (async () => {
       try {
@@ -447,6 +525,9 @@ export function Room({ guild }: { guild?: string } = {}) {
           if (fresh.user.id.startsWith("guest-")) setNeedsLogin(true);
           else await enterGuildRoom(fresh.identity);
         }
+        // Fora do Discord e fora de um servidor, um `?room=` na barra é um
+        // convite colado: entra direto, em vez de mostrar o lobby por trás.
+        else await enterLinkedRoom(fresh.identity, fresh.user.id);
       } catch (err) {
         if (!alive) return;
         setBootFailure(
@@ -462,7 +543,7 @@ export function Room({ guild }: { guild?: string } = {}) {
       alive = false;
       clearTimeout(watchdog);
     };
-  }, [inDiscord, api, joinCallRoom, enterGuildRoom, guild]);
+  }, [inDiscord, api, joinCallRoom, enterGuildRoom, enterLinkedRoom, guild]);
 
   // ------------------------------------------------------------- o lobby
 
@@ -470,7 +551,7 @@ export function Room({ guild }: { guild?: string } = {}) {
     if (inDiscord || guild || inRoom) return;
 
     let alive = true;
-    const buscar = async () => {
+    const refresh = async () => {
       // A recarga pausa enquanto houver modal aberto: recarregar sob o cursor
       // tiraria o card do lugar no meio de um clique (RN-SAL-13).
       if (modalOpen || askingPassword) return;
@@ -485,8 +566,8 @@ export function Room({ guild }: { guild?: string } = {}) {
       }
     };
 
-    void buscar();
-    const t = setInterval(buscar, RECARGA_MS);
+    void refresh();
+    const t = setInterval(refresh, RELOAD_MS);
     return () => {
       alive = false;
       clearInterval(t);
@@ -563,27 +644,29 @@ export function Room({ guild }: { guild?: string } = {}) {
     : null;
 
   const iAmOnAir =
-    onAirLocal || room.participants.some((p) => p.broadcasting && p.id === session?.user.id);
+    onAirIntent ?? room.participants.some((p) => p.broadcasting && p.id === session?.user.id);
 
-  async function share(preset: typeof PRESET_PADRAO, sound: boolean) {
+  async function share(preset: typeof DEFAULT_PRESET, sound: boolean) {
     setBroadcastModal(false);
     if (!tokens) return;
+    // Opinião velha ("acabei de parar") não pode sobreviver a um começo novo.
+    setOnAirIntent(null);
 
-    const r = await iniciarTransmissao(tokens, preset, sound, ws, {
+    const r = await startBroadcast(tokens, preset, sound, ws, {
       onEnd: (reason) => {
         mine.current = null;
-        setOnAirLocal(false);
+        setOnAirIntent(false);
         if (reason) toast(reason);
       },
-      onAviso: (m) => toast(m),
+      onNotice: (m) => toast(m),
     });
 
     if (r.kind === "iframe") {
       mine.current = r.broadcaster;
-      setOnAirLocal(true);
+      setOnAirIntent(true);
     }
-    else if (r.kind === "aba") toast("Abri a aba de captura. Deixe-a aberta enquanto transmite.");
-    else if (r.kind === "recusado") toast(r.message, true);
+    else if (r.kind === "tab") toast("Abri a aba de captura. Deixe-a aberta enquanto transmite.");
+    else if (r.kind === "refused") toast(r.message, true);
   }
 
   /**
@@ -623,7 +706,7 @@ export function Room({ guild }: { guild?: string } = {}) {
     if (!clean) return;
     store(STORED_NAME, clean);
     connection.rename(clean);
-    setSession((atual) => (atual ? { ...atual, user: { ...atual.user, name: clean } } : atual));
+    setSession((current) => (current ? { ...current, user: { ...current.user, name: clean } } : current));
   }
 
   const toggleMute = useCallback(() => {
@@ -633,18 +716,18 @@ export function Room({ guild }: { guild?: string } = {}) {
     connection.setVolume(v);
   }, [connection, room.volume]);
 
-  useAtalhos(inRoom, {
+  useShortcuts(inRoom, {
     fullscreen: toggleFullscreen,
-    mudo: toggleMute,
-    modo: () => connection.setModo(room.modo === "grade" ? "foco" : "grade"),
-    people: () => connection.mostrarPessoas(!showPeople),
-    aoPalco: (i) => {
+    mute: toggleMute,
+    mode: () => connection.setMode(room.mode === "grid" ? "focus" : "grid"),
+    people: () => connection.setShowPeople(!showPeople),
+    toStage: (i) => {
       const target = room.streams[i];
       if (!target) return;
       setFocused(target.slot);
-      connection.setModo("foco");
+      connection.setMode("focus");
     },
-    ajuda: () => setHelpOpen(true),
+    help: () => setHelpOpen(true),
   });
 
   /**
@@ -661,7 +744,7 @@ export function Room({ guild }: { guild?: string } = {}) {
         setPoppedOut(null);
         return;
       }
-      const canvas = connection.canvasDe(slot);
+      const canvas = connection.canvasFor(slot);
       if (!canvas) return;
       void popOut(canvas, () => {
         popoutWindow.current = null;
@@ -880,7 +963,7 @@ export function Room({ guild }: { guild?: string } = {}) {
         {iAmOnAir ? (
           <>
             <span className="rounded bg-tile px-2 py-1 text-[11px] font-semibold tracking-wide text-texto">
-              {PRESET_PADRAO.resumo.replace(" · ", " ").toUpperCase()}
+              {DEFAULT_PRESET.summary.replace(" · ", " ").toUpperCase()}
             </span>
             <span className="rounded bg-perigo px-2 py-1 text-[11px] font-semibold tracking-wide text-white">
               AO VIVO
@@ -903,7 +986,7 @@ export function Room({ guild }: { guild?: string } = {}) {
           controles cobrem o rodapé dos tiles e o name de quem está neles. */}
       <main className={`relative min-h-0 flex-1 ${inRoom ? "pb-[76px]" : ""}`}>
         {inRoom ? (
-          room.modo === "foco" && room.streams.length > 0 ? (
+          room.mode === "focus" && room.streams.length > 0 ? (
             <Stage
               room={room}
               connection={connection}
@@ -925,16 +1008,16 @@ export function Room({ guild }: { guild?: string } = {}) {
               showWithoutVideo={showPeople}
               onFocus={(slot) => {
                 setFocused(slot);
-                connection.setModo("foco");
+                connection.setMode("focus");
               }}
               onMenu={(slot, userId, x, y) => setTileMenu({ slot, userId, x, y })}
               poppedOut={poppedOut}
             />
           ) : (
             <Panel
-              title={room.phase === "caiu" ? "Reconectando…" : "Ninguém na sala"}
+              title={room.phase === "down" ? "Reconectando…" : "Ninguém na sala"}
               text={
-                room.phase === "caiu"
+                room.phase === "down"
                   ? "A conexão com a sala caiu."
                   : "Aguardando participantes."
               }
@@ -1032,7 +1115,7 @@ export function Room({ guild }: { guild?: string } = {}) {
             de tela cheia fica no canto — a geometria do Discord. */}
         {inRoom ? (
           <div
-            data-controles
+            data-controls
             className={
               "pointer-events-none absolute inset-x-0 bottom-4 flex justify-center transition-opacity duration-200 " +
               (controlsVisible ? "opacity-100" : "pointer-events-none opacity-0")
@@ -1042,14 +1125,14 @@ export function Room({ guild }: { guild?: string } = {}) {
               <Group>
                 <RoundButton
                   label={iAmOnAir ? "Parar de transmitir" : "Compartilhar tela"}
-                  state={iAmOnAir ? "ativo" : "neutro"}
+                  state={iAmOnAir ? "active" : "neutral"}
                   onClick={() => (iAmOnAir ? stopMyBroadcast() : setBroadcastModal(true))}
                 >
-                  {iAmOnAir ? <Icon.Parar /> : <Icon.Screen />}
+                  {iAmOnAir ? <Icon.Stop /> : <Icon.Screen />}
                 </RoundButton>
 
                 {/* Só existe quando há som para controlar (RN-AUD-14). */}
-                {room.comSom.length > 0 ? (
+                {room.withSound.length > 0 ? (
                   <label className="flex items-center gap-2 pr-2 pl-1">
                     <span className="sr-only">Volume geral</span>
                     <RoundButton
@@ -1058,7 +1141,7 @@ export function Room({ guild }: { guild?: string } = {}) {
                       // dois estados que precisam concordar (RN-AUD-12).
                       onClick={toggleMute}
                     >
-                      {room.volume === 0 ? <Icon.Mudo /> : <Icon.Som />}
+                      {room.volume === 0 ? <Icon.Muted /> : <Icon.Sound />}
                     </RoundButton>
                     <input
                       type="range"
@@ -1077,7 +1160,7 @@ export function Room({ guild }: { guild?: string } = {}) {
                 ) : null}
                 <span className="relative">
                   <RoundButton label="Mais opções" onClick={() => setMenuOpen((v) => !v)}>
-                    <Icon.Mais />
+                    <Icon.More />
                   </RoundButton>
 
                   {menuOpen ? (
@@ -1088,16 +1171,16 @@ export function Room({ guild }: { guild?: string } = {}) {
                       {room.streams.length > 0 ? (
                         <CheckItem
                           label="Exibição em grade"
-                          checked={room.modo === "grade"}
+                          checked={room.mode === "grid"}
                           onToggle={() =>
-                            connection.setModo(room.modo === "grade" ? "foco" : "grade")
+                            connection.setMode(room.mode === "grid" ? "focus" : "grid")
                           }
                         />
                       ) : null}
                       <CheckItem
                         label="Participantes sem vídeo"
                         checked={showPeople}
-                        onToggle={() => connection.mostrarPessoas(!showPeople)}
+                        onToggle={() => connection.setShowPeople(!showPeople)}
                       />
                       <Separator />
                       {/* Só o dono troca a senha. O servidor confere de novo
@@ -1133,8 +1216,8 @@ export function Room({ guild }: { guild?: string } = {}) {
               {/* Dentro do Discord não há botão de sair: quem fecha a atividade
                   é o próprio Discord (RN-SAL-23). */}
               {inDiscord ? null : (
-                <RoundButton label="Sair da sala" state="encerrar" wide onClick={leaveRoom}>
-                  <Icon.Sair />
+                <RoundButton label="Sair da sala" state="end" wide onClick={leaveRoom}>
+                  <Icon.Leave />
                 </RoundButton>
               )}
             </ControlBar>
@@ -1157,7 +1240,7 @@ export function Room({ guild }: { guild?: string } = {}) {
 
         {inRoom && room.streams.length > 0 ? (
           <div
-            data-controles
+            data-controls
             className={
               "absolute right-4 bottom-4 transition-opacity duration-200 " +
               (controlsVisible ? "opacity-100" : "pointer-events-none opacity-0")
@@ -1171,7 +1254,7 @@ export function Room({ guild }: { guild?: string } = {}) {
                   label={poppedOut !== null ? "Trazer de volta" : "Destacar em outra janela"}
                   onClick={() => togglePopout(poppedOut ?? (room.watching[0] as number))}
                 >
-                  <Icon.Destacar />
+                  <Icon.Popout />
                 </RoundButton>
               ) : null}
 
@@ -1181,7 +1264,7 @@ export function Room({ guild }: { guild?: string } = {}) {
                 label={fullscreen ? "Sair da tela cheia" : "Screen cheia"}
                 onClick={toggleFullscreen}
               >
-                {fullscreen ? <Icon.SairTelaCheia /> : <Icon.TelaCheia />}
+                {fullscreen ? <Icon.ExitFullscreen /> : <Icon.Fullscreen />}
               </RoundButton>
             </span>
           </div>
@@ -1193,7 +1276,7 @@ export function Room({ guild }: { guild?: string } = {}) {
           name={room.participants.find((p) => p.id === tileMenu.userId)?.name ?? "essa pessoa"}
           userId={tileMenu.userId}
           connection={connection}
-          hasSound={room.comSom.includes(tileMenu.slot)}
+          hasSound={room.withSound.includes(tileMenu.slot)}
           pinned={pinned === tileMenu.slot}
           onPin={() => {
             setPinned(pinned === tileMenu.slot ? null : tileMenu.slot);
