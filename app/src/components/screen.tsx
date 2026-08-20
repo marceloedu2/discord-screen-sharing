@@ -26,6 +26,7 @@ export function Screen({
   watching,
   drawing,
   isMe,
+  kind = "screen",
   quality,
   occupancy,
   connectionQuality,
@@ -42,6 +43,8 @@ export function Screen({
   watching: boolean;
   drawing: boolean;
   isMe: boolean;
+  /** Tela ou câmera (RF-CAM-1) — só muda o ícone do selo de nome. */
+  kind?: "screen" | "camera";
   /** "1080P 30FPS", quando se sabe. Vai no canto do tile, como no Discord. */
   quality?: string | null;
   /** "9/12" quando a transmissão passa de 75% do teto (RF-AST-12). */
@@ -213,10 +216,17 @@ export function Screen({
         }
       >
         <span aria-hidden="true" className="shrink-0 text-suave">
-          <svg viewBox="0 0 24 24" className="size-3.5 fill-none stroke-current [stroke-width:2]">
-            <rect x="2" y="4" width="20" height="13" rx="2" />
-            <path d="M8 21h8" />
-          </svg>
+          {kind === "camera" ? (
+            <svg viewBox="0 0 24 24" className="size-3.5 fill-none stroke-current [stroke-width:2]">
+              <rect x="2" y="6" width="14" height="12" rx="2" />
+              <path d="M16 10.5 22 7v10l-6-3.5" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" className="size-3.5 fill-none stroke-current [stroke-width:2]">
+              <rect x="2" y="4" width="20" height="13" rx="2" />
+              <path d="M8 21h8" />
+            </svg>
+          )}
         </span>
         <span className={`truncate font-medium text-texto ${compact ? "text-[11px]" : "text-[13px]"}`}>
           {name}

@@ -76,6 +76,7 @@ export function Grid({
             watching={watching.has(s.slot)}
             drawing={drawing.has(s.slot)}
             isMe={s.userId === myId}
+            kind={s.kind}
             onWatch={() => connection.watch(s.slot)}
             onStop={() => connection.unwatch(s.slot)}
             occupancy={occupancyOf(s.watchers.length)}

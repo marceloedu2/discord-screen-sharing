@@ -36,6 +36,10 @@ export function Capture() {
   const [preview, setPreview] = useState<{ width: number; height: number; hasSound: boolean } | null>(
     null
   );
+  // Painel de "áudio de um app externo" (RF-TRX-9): fechado até alguém pedir.
+  const [audioInputOpen, setAudioInputOpen] = useState(false);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioInputId, setAudioInputId] = useState("");
   const previewCanvas = useRef<HTMLCanvasElement>(null);
   const broadcaster = useRef<Broadcaster | null>(null);
   const params = useSearchParams();
@@ -60,8 +64,8 @@ export function Capture() {
       // Os padrões são os da spec: Boa, 2,5 Mbps, 30 fps (RF-TRX-2).
       bitrate: Number(params.get("q")) || 2_500_000,
       fps: Number(params.get("fps")) || 30,
-      sound: params.get("sound") === "1",
       preset: presetOf(params.get("preset")),
+      source: (params.get("source") === "camera" ? "camera" : "screen") as "screen" | "camera",
     }),
     [params]
   );
@@ -82,11 +86,11 @@ export function Capture() {
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const b = createBroadcaster({
-      wsUrl: `${proto}://${location.host}/ws?t=${encodeURIComponent(opts.token)}`,
+      wsUrl: `${proto}://${location.host}/ws?t=${encodeURIComponent(opts.token)}&kind=${opts.source}`,
       bitrate: opts.bitrate,
       fps: opts.fps,
       maxHeight: opts.preset.maxHeight,
-      audio: opts.sound,
+      source: opts.source,
       onStatus: setStatus,
       onStats: setStats,
       onNotice: setNotice,
@@ -137,9 +141,10 @@ export function Capture() {
   const stopBroadcast = useCallback(() => broadcaster.current?.stop(), []);
 
   /**
-   * "Som de uma aba" (RF-TRX-6) — a saída para quem quer tela inteira **com**
+   * "Som de uma aba/janela" (RF-TRX-6) — a saída para quem quer tela inteira **com**
    * som. Abre um segundo seletor, aproveita só a faixa de áudio e descarta o
-   * vídeo daquela escolha. O vídeo continua sendo a tela inteira.
+   * vídeo daquela escolha. O vídeo continua sendo a tela inteira. Aceita aba
+   * ou janela como fonte (RN-TRX-24a) — só a tela inteira segue recusada.
    */
   const tabSound = useCallback(async () => {
     setError(null);
@@ -147,12 +152,60 @@ export function Capture() {
       await broadcaster.current?.swapSound();
       setSoundBlocked(false);
       setHasSound(true);
-      setNotice("Som ligado, vindo da aba escolhida.");
+      setNotice("Som ligado, vindo da escolha feita.");
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") return;
       setError(err instanceof Error ? err.message : "Não consegui pegar o som.");
     }
   }, []);
+
+  /**
+   * Abre o painel de "áudio de um app externo" e lista os microfones — que é
+   * como um cabo virtual (VB-Cable, BlackHole) aparece para o navegador
+   * (RF-TRX-9). Sem rótulo nenhum antes de o mic ter sido autorizado uma vez
+   * nesta origem — é a própria API que esconde o nome até então.
+   */
+  const openAudioInputs = useCallback(async () => {
+    setAudioInputOpen(true);
+    setError(null);
+    try {
+      const list = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === "audioinput"
+      );
+      setAudioInputs(list);
+      if (list[0]) setAudioInputId((current) => current || list[0]!.deviceId);
+    } catch {
+      // Sem permissão de dispositivo ainda: o botão "Permitir microfones" resolve.
+    }
+  }, []);
+
+  /** Só para desbloquear os rótulos dos dispositivos (RF-TRX-9); o áudio de verdade vem de `applyAudioInput`. */
+  const unlockAudioLabels = useCallback(async () => {
+    setError(null);
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+      await openAudioInputs();
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") return;
+      setError(err instanceof Error ? err.message : "Não consegui listar os microfones.");
+    }
+  }, [openAudioInputs]);
+
+  const applyAudioInput = useCallback(async () => {
+    if (!audioInputId) return;
+    setError(null);
+    try {
+      await broadcaster.current?.useAudioInput(audioInputId);
+      setSoundBlocked(false);
+      setHasSound(true);
+      setAudioInputOpen(false);
+      setNotice("Som ligado, vindo do dispositivo escolhido.");
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") return;
+      setError(err instanceof Error ? err.message : "Não consegui captar esse dispositivo.");
+    }
+  }, [audioInputId]);
 
   /** Trocar a tela sem derrubar a transmissão (RF-TRX-8). */
   const swapScreen = useCallback(async () => {
@@ -219,10 +272,14 @@ export function Capture() {
 
   if (!inBrowser) return null;
 
+  const isCamera = options.source === "camera";
+
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-5 rounded-xl border border-linha bg-painel p-8">
       <div>
-        <h1 className="text-2xl font-semibold text-texto">Compartilhar tela</h1>
+        <h1 className="text-2xl font-semibold text-texto">
+          {isCamera ? "Ligar câmera" : "Compartilhar tela"}
+        </h1>
         <p className="mt-1 text-suave">
           Esta aba precisa continuar aberta enquanto você transmite. Você pode goBack ao Discord
           normalmente.
@@ -245,21 +302,23 @@ export function Capture() {
                 className="w-full rounded-md bg-fundo"
               />
               <p className="text-[13.5px] text-suave">
-                {preview.width}×{preview.height} ·{" "}
-                {preview.hasSound ? "com som" : "sem som"}
+                {preview.width}×{preview.height}
+                {isCamera ? null : ` · ${preview.hasSound ? "com som" : "sem som"}`}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button variant="primary" wide onClick={() => void goLive()}>
                   Entrar no ar
                 </Button>
-                <Button
-                  onClick={() => {
-                    discard();
-                    void begin();
-                  }}
-                >
-                  Trocar de tela
-                </Button>
+                {isCamera ? null : (
+                  <Button
+                    onClick={() => {
+                      discard();
+                      void begin();
+                    }}
+                  >
+                    Trocar de tela
+                  </Button>
+                )}
               </div>
             </div>
           ) : null}
@@ -267,11 +326,11 @@ export function Capture() {
           <div className="flex items-center gap-3">
             {onAir ? (
               <Button variant="end" wide onClick={stopBroadcast}>
-                Parar de transmitir
+                {isCamera ? "Desligar câmera" : "Parar de transmitir"}
               </Button>
             ) : preview ? null : (
               <Button variant="primary" wide onClick={() => void begin()}>
-                Escolher tela e transmitir
+                {isCamera ? "Ligar câmera" : "Escolher tela e transmitir"}
               </Button>
             )}
             {onAir ? (
@@ -290,11 +349,11 @@ export function Capture() {
           {soundBlocked ? (
             <div className="rounded-lg border border-atencao bg-atencao/10 px-4 py-3">
               <p className="text-[14px] text-texto">
-                A tela inteira carrega o som do Discord junto, e a call se ouviria em eco. Está no
-                ar <strong>sem som</strong>.
+                Tela inteira carrega o som do sistema junto — inclusive o do Discord —, e a call
+                se ouviria em eco. Está no ar <strong>sem som</strong>.
               </p>
               <Button variant="warning" wide className="mt-3" onClick={() => void tabSound()}>
-                Som de uma aba
+                Som de uma aba/janela
               </Button>
             </div>
           ) : null}
@@ -328,9 +387,51 @@ export function Capture() {
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => void swapScreen()}>Trocar de tela</Button>
                 {soundBlocked || hasSound ? null : (
-                  <Button onClick={() => void tabSound()}>Som de uma aba</Button>
+                  <Button onClick={() => void tabSound()}>Som de uma aba/janela</Button>
+                )}
+                {audioInputOpen ? null : (
+                  <Button onClick={() => void openAudioInputs()}>App fora do navegador</Button>
                 )}
               </div>
+
+              {/* Nenhuma API web isola o som de um app fora do navegador
+                  (RN-TRX-24b) — nem `windowAudio`, que só alcança o que o
+                  próprio navegador está tocando. Um cabo de áudio virtual
+                  resolve fora da web: o app manda o som para lá, e o cabo
+                  aparece aqui como um microfone comum. */}
+              {audioInputOpen ? (
+                <div className="flex flex-col gap-2 rounded-lg border border-linha bg-painel-fundo px-3 py-3">
+                  <p className="text-[13px] text-suave">
+                    Para o som de um jogo ou app instalado, instale um cabo de áudio virtual —{" "}
+                    <strong>VB-Cable</strong> no Windows, <strong>BlackHole</strong> ou{" "}
+                    <strong>Loopback</strong> no Mac — e mande o som do app para lá. Ele aparece
+                    aqui como um microfone.
+                  </p>
+                  {audioInputs.length === 0 ? (
+                    <Button onClick={() => void unlockAudioLabels()}>Permitir microfones</Button>
+                  ) : (
+                    <>
+                      <select
+                        value={audioInputId}
+                        onChange={(e) => setAudioInputId(e.target.value)}
+                        className="w-full rounded-md border border-linha bg-[#111214] px-2.5 py-2 text-texto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acento"
+                      >
+                        {audioInputs.map((d) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label || "Dispositivo sem nome"}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="primary" onClick={() => void applyAudioInput()}>
+                          Usar este áudio
+                        </Button>
+                        <Button onClick={() => setAudioInputOpen(false)}>Cancelar</Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : null}
 

@@ -113,55 +113,85 @@ de aba — sem isso a transmissão congela sem erro nenhum.
 
 ## Som
 
-`RN-TRX-24` · herdado · P0 — **O som só sai de aba.** É a regra mais importante
-desta spec e a que mais custa explicar.
+`RN-TRX-24` · alterado · P0 — **Tela inteira nunca tem som — aba e janela têm.**
+É a regra mais importante desta spec e a que mais custa explicar.
 
-Compartilhar a tela inteira entrega a **mistura do sistema**, com a saída do
+Compartilhar a **tela inteira** entrega a mistura do sistema, com a saída do
 Discord dentro — e a call inteira passa a se ouvir de volta, com atraso.
-Insuportável em segundos. Não existe API web para tirar um processo dessa
-mistura: o áudio é capturado por processo e a relação com uma janela não é
-um-para-um. O Windows tem essa API (é assim que o Discord nativo faz), mas
-página web não alcança.
+Insuportável em segundos. Não existe processo nenhum para isolar quando o que
+se compartilha é o desktop inteiro: a mistura é sempre "tudo".
 
 O que dá para saber é o `displaySurface` escolhido:
 
 | `displaySurface` | Som |
 |---|---|
 | `browser` (aba) | **liberado** — o som sai só daquela aba |
-| `monitor`, `window` | **barrado na origem**, antes de sair da máquina |
+| `window` (janela de app) | **liberado**, desde `RN-TRX-24a` |
+| `monitor` (tela inteira) | **barrado na origem**, antes de sair da máquina |
 
-`RF-TRX-5` · herdado · P0 — Som barrado: a faixa é parada e removida, a
-transmissão segue **sem som**, e a interface avisa — com a engrenagem de ajustes
-piscando em amarelo, porque é atrás dela que está a saída. Um toast que some não
-resolve: ninguém acha o caminho depois.
+`RN-TRX-24a` · novo · P0 — Janela de app **passou a ter som isolado**, com
+`windowAudio: 'window'` no `getDisplayMedia()` (Chrome 141+, meados de 2025) —
+a mesma API que Meet e Discord Web usam. `systemAudio` e `windowAudio` são
+opções de **topo** do `getDisplayMedia()`, irmãs de `video`/`audio` — não
+entram nas `MediaTrackConstraints` do áudio. O spec chama isto de "hint": o
+navegador **pode ignorar** (`"The user agent MAY ignore this hint"`), e não
+existe, em lugar nenhum da API, um jeito de o JavaScript conferir depois se o
+que voltou era mesmo isolado — o código confia no que o navegador devolve,
+como qualquer site confia. Sem suporte (navegador velho, ou plataforma sem
+isolamento por processo), a faixa de áudio simplesmente não vem, e cai no caso
+já tratado de `RN-TRX-26`.
 
-`RF-TRX-6` · herdado · P1 — **"Som de uma aba"** é a saída para quem quer tela
-inteira **com** som. Abre um segundo seletor, aproveita **só a faixa de áudio** e
-descarta o vídeo daquela escolha. O vídeo continua sendo a tela inteira.
+Fontes: [Screen Capture API — windowAudio](https://w3c.github.io/mediacapture-screen-share/#dom-displaymediastreamoptions-windowaudio),
+[Intent to Ship: windowAudio for getDisplayMedia()](https://www.mail-archive.com/blink-dev@chromium.org/msg14395.html)
+(Chrome Platform Status: *Shipping on desktop 141*).
 
-Serve para YouTube, Twitch, jogo de navegador. Para jogo instalado, cujo som não
-está em aba nenhuma, não tem como — nem aqui nem em qualquer outro site.
+`RF-TRX-5` · herdado · P0 — Som barrado (tela inteira): a faixa é parada e
+removida, a transmissão segue **sem som**, e a interface avisa — com a
+engrenagem de ajustes piscando em amarelo, porque é atrás dela que está a
+saída. Um toast que some não resolve: ninguém acha o caminho depois.
 
-`RN-TRX-25` · herdado · P0 — Restrições da captura de som:
+`RF-TRX-6` · alterado · P1 — **"Som de uma aba/janela"** é a saída para quem
+está com **tela inteira** e quer som. Abre um segundo seletor, aproveita **só a
+faixa de áudio** e descarta o vídeo daquela escolha. O vídeo continua sendo a
+tela inteira. Aceita aba ou janela como fonte (`RN-TRX-24a`) — só tela inteira
+segue recusada ali também.
+
+Serve para YouTube, Twitch, jogo de navegador, e agora também para jogo
+instalado — desde que a pessoa esteja transmitindo a tela inteira e escolha,
+neste segundo seletor, a janela daquele jogo.
+
+`RN-TRX-25` · alterado · P0 — Restrições da captura de som:
 
 ```ts
+// Opções de topo do getDisplayMedia(), ao lado de video/audio:
 {
-  systemAudio: 'include',
+  systemAudio: 'exclude',  // tela inteira nunca tem som — nem oferece a caixa
+  windowAudio: 'window',   // janela de app: pede o som isolado, não o do sistema
+}
+// Dentro de audio: {...} (MediaTrackConstraints):
+{
   echoCancellation: false,
   noiseSuppression: false,
   autoGainControl: false,
   restrictOwnAudio: true,  // só quando o navegador suporta
+  sampleRate: { ideal: 48_000 },
 }
 ```
 
 Os tratamentos de voz ficam **desligados**: existem para microfone e, em som de
 aplicativo, cortam justamente o que se queria ouvir. `restrictOwnAudio` tira da
 captura o que a própria página está tocando — sem ele, quem transmite enquanto
-assiste devolve o som da outra tela para a sala, em laço.
+assiste devolve o som da outra tela para a sala, em laço. `sampleRate: {ideal:
+48_000}` é `RN-AUD-14`: sem pedir 48 kHz na captura, o `AudioDecoder` de quem
+assiste rejeita a taxa nativa mais comum de hardware real (44100 Hz) — de
+forma assíncrona e muda, sem lançar exceção nem `isConfigSupported()` acusar
+nada. Testado isolado, direto na API do navegador: 44100 falha, 48000
+funciona.
 
 `RN-TRX-26` · herdado · P1 — Pedir áudio **não garante receber**. Em vários
-sistemas a caixa "compartilhar o som" fica desmarcada e o navegador devolve a
-tela sem faixa de som. O código trata `null` como caso normal.
+sistemas a caixa "compartilhar o som" fica desmarcada, ou a janela escolhida
+não suporta o isolamento, e o navegador devolve a tela sem faixa de som. O
+código trata `null` como caso normal.
 
 `RN-TRX-27` · herdado · P1 — Opus estéreo a **96 kbps**. Transparente para som
 de aplicativo e de vídeo, e ruído perto dos megabits do vídeo — não vale

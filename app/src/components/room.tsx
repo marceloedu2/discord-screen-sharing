@@ -303,12 +303,13 @@ export function Room({ guild }: { guild?: string } = {}) {
 
       connection.connect(ws, tokens, storedName(), {
         onError: (m) => toast(m, true),
-        onStreamStart: (slot, userId) => {
+        onStreamStart: (slot, userId, kind) => {
           // Sem som de notificação (RN-AST-33): um aviso sonoro numa página que
           // já toca o áudio de outra pessoa é ruído em cima de ruído.
           const quem = connection.getSnapshot().participants.find((p) => p.id === userId);
+          const oQue = kind === "camera" ? "ligou a câmera" : "começou a compartilhar a tela";
           setNotice({
-            text: `${quem?.name ?? "Alguém"} começou a compartilhar a tela`,
+            text: `${quem?.name ?? "Alguém"} ${oQue}`,
             error: false,
             action: { label: "Assistir", onClick: () => connection.watch(slot) },
           });
@@ -646,13 +647,13 @@ export function Room({ guild }: { guild?: string } = {}) {
   const iAmOnAir =
     onAirIntent ?? room.participants.some((p) => p.broadcasting && p.id === session?.user.id);
 
-  async function share(preset: typeof DEFAULT_PRESET, sound: boolean) {
+  async function share(preset: typeof DEFAULT_PRESET) {
     setBroadcastModal(false);
     if (!tokens) return;
     // Opinião velha ("acabei de parar") não pode sobreviver a um começo novo.
     setOnAirIntent(null);
 
-    const r = await startBroadcast(tokens, preset, sound, ws, {
+    const r = await startBroadcast(tokens, preset, ws, {
       onEnd: (reason) => {
         mine.current = null;
         setOnAirIntent(false);
@@ -1056,7 +1057,7 @@ export function Room({ guild }: { guild?: string } = {}) {
         {broadcastModal ? (
           <BroadcastModal
             onClose={() => setBroadcastModal(false)}
-            onConfirm={(preset, sound) => void share(preset, sound)}
+            onConfirm={(preset) => void share(preset)}
           />
         ) : null}
 

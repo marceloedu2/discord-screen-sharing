@@ -88,6 +88,7 @@ export function Stage({
             watching={watching.has(onStage.slot)}
             drawing={drawing.has(onStage.slot)}
             isMe={onStage.userId === myId}
+            kind={onStage.kind}
             onWatch={() => connection.watch(onStage.slot)}
             onStop={() => connection.unwatch(onStage.slot)}
             occupancy={occupancyOf(onStage.watchers.length)}
@@ -116,6 +117,7 @@ export function Stage({
                   watching={watching.has(s.slot)}
                   drawing={drawing.has(s.slot)}
                   isMe={s.userId === myId}
+                  kind={s.kind}
                   onWatch={() => connection.watch(s.slot)}
                   onStop={() => connection.unwatch(s.slot)}
                   onMenu={(x, y) => onMenu(s.slot, s.userId, x, y)}

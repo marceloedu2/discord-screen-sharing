@@ -58,6 +58,8 @@ export interface RoomState {
 export interface StreamState {
   slot: number;
   userId: string;
+  /** Tela ou câmera (RF-CAM-1) — só muda o ícone de quem assiste. */
+  kind: 'screen' | 'camera';
   watchers: Person[];
 }
 
@@ -77,7 +79,7 @@ export interface StateMessage {
 export type ServerMessage =
   | StateMessage
   | { type: 'slot'; slot: number }
-  | { type: 'stream-start'; slot: number; userId: string }
+  | { type: 'stream-start'; slot: number; userId: string; kind: 'screen' | 'camera' }
   | { type: 'config'; slot: number; config: Record<string, unknown> }
   | { type: 'audio-config'; slot: number; config: Record<string, unknown> }
   | { type: 'stream-stop'; slot: number }

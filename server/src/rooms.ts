@@ -24,6 +24,18 @@ import type { Broadcast, CodecConfig, PasswordHash, Person, Room, Viewer } from 
 const MAX_BROADCASTERS = 4;
 
 /**
+ * A chave real de `room.broadcasters` (RF-CAM-3): uma pessoa pode ter **até
+ * duas** transmissões ao mesmo tempo na mesma sala — uma de tela, uma de
+ * câmera —, cada uma com o próprio slot. Por `uid` sozinho bastava quando só
+ * existia uma transmissão por pessoa; agora o par uid+kind é que identifica
+ * uma transmissão.
+ */
+const broadcastKey = (uid: string, kind: 'screen' | 'camera'): string => `${uid}:${kind}`;
+
+const isBroadcasting = (room: Room, uid: string): boolean =>
+  room.broadcasters.has(broadcastKey(uid, 'screen')) || room.broadcasters.has(broadcastKey(uid, 'camera'));
+
+/**
  * Teto de espectadores **por transmissão** (RF-AST-11).
  *
  * A banda de subida cresce linearmente com quem assiste (RN-TRX-34): a 8 Mbps o
@@ -242,7 +254,7 @@ export function listRooms(instance: string) {
 function countPeople(room: Room): number {
   const ids = new Set<string>();
   for (const v of room.viewers.values()) ids.add(v.info.id);
-  for (const uid of room.broadcasters.keys()) ids.add(uid);
+  for (const b of room.broadcasters.values()) ids.add(b.info.id);
   return ids.size;
 }
 
@@ -321,13 +333,14 @@ function roomState(room: Room) {
 
   const participants = [...byId.values()].map((info) => ({
     ...info,
-    broadcasting: room.broadcasters.has(info.id),
+    broadcasting: isBroadcasting(room, info.id),
   }));
 
   // Quem transmite pode ter fechado a aba da Activity: continua na lista,
   // senão o vídeo fica sem dono visível.
-  for (const [uid, b] of room.broadcasters) {
-    if (byId.has(uid)) continue;
+  for (const b of room.broadcasters.values()) {
+    if (byId.has(b.info.id)) continue;
+    byId.set(b.info.id, b.info);
     participants.push({ ...b.info, broadcasting: true });
   }
 
@@ -346,7 +359,7 @@ function roomState(room: Room) {
     participants,
     streams: [...room.broadcasters.values()]
       .filter((b) => b.streaming)
-      .map((b) => ({ slot: b.slot, userId: b.info.id, watchers: watchersOf(room, b.slot) })),
+      .map((b) => ({ slot: b.slot, userId: b.info.id, kind: b.kind, watchers: watchersOf(room, b.slot) })),
   };
 }
 
@@ -378,9 +391,24 @@ function freeSlot(room: Room): number | null {
   return null;
 }
 
-/** A transmissão criada, ou uma string com o motivo da recusa. */
-export function attachBroadcaster(room: Room, ws: WebSocket, info: Person): Broadcast | string {
-  if (room.broadcasters.has(info.id)) return 'Você já está transmitindo nesta sala.';
+/**
+ * A transmissão criada, ou uma string com o motivo da recusa.
+ *
+ * `kind` já vem resolvido na conexão (RF-CAM-3) — a URL do WebSocket carrega
+ * `?kind=`, porque o `start` chega tarde demais para decidir se esta conexão
+ * pode existir: o slot e a checagem de duplicata têm que acontecer aqui.
+ */
+export function attachBroadcaster(
+  room: Room,
+  ws: WebSocket,
+  info: Person,
+  kind: 'screen' | 'camera'
+): Broadcast | string {
+  if (room.broadcasters.has(broadcastKey(info.id, kind))) {
+    return kind === 'camera'
+      ? 'Sua câmera já está ligada nesta sala.'
+      : 'Você já está compartilhando a tela nesta sala.';
+  }
   if (room.broadcasters.size >= MAX_BROADCASTERS) {
     return `Limite de ${MAX_BROADCASTERS} transmissões simultâneas atingido.`;
   }
@@ -395,8 +423,9 @@ export function attachBroadcaster(room: Room, ws: WebSocket, info: Person): Broa
     streaming: false,
     config: null,
     audioConfig: null,
+    kind,
   };
-  room.broadcasters.set(info.id, broadcast);
+  room.broadcasters.set(broadcastKey(info.id, kind), broadcast);
   room.slots.set(slot, broadcast);
   room.emptySince = null;
 
@@ -414,7 +443,7 @@ export function startStream(room: Room, b: Broadcast): void {
     v.primed.delete(b.slot);
     v.watching.delete(b.slot);
   }
-  toViewers(room, { type: 'stream-start', slot: b.slot, userId: b.info.id });
+  toViewers(room, { type: 'stream-start', slot: b.slot, userId: b.info.id, kind: b.kind });
   broadcastState(room);
 }
 
@@ -516,16 +545,17 @@ export function stopStream(room: Room, b: Broadcast): void {
 export function detachBroadcaster(room: Room, b: Broadcast): void {
   // Só remove se ainda for a transmissão registrada: uma reconexão rápida pode
   // ter posto outra no lugar, e apagá-la aqui derrubaria a que está no ar.
-  if (room.broadcasters.get(b.info.id) !== b) return;
+  const key = broadcastKey(b.info.id, b.kind);
+  if (room.broadcasters.get(key) !== b) return;
 
   stopStream(room, b);
-  room.broadcasters.delete(b.info.id);
+  room.broadcasters.delete(key);
   room.slots.delete(b.slot);
   broadcastState(room);
 }
 
-export const broadcasterOf = (room: Room, uid: string): Broadcast | null =>
-  room.broadcasters.get(uid) ?? null;
+export const broadcasterOf = (room: Room, uid: string, kind: 'screen' | 'camera'): Broadcast | null =>
+  room.broadcasters.get(broadcastKey(uid, kind)) ?? null;
 
 // ----------------------------------------------------------------- espectador
 

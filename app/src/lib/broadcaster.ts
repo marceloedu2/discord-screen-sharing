@@ -30,6 +30,15 @@ const TYPE_AUDIO = 3;
 /** Opus estéreo a 96 kbps: transparente, e ruído perto do vídeo (RN-TRX-27). */
 const AUDIO_BITRATE = 96_000;
 
+/**
+ * A única taxa que os dois lados do pipeline concordam de verdade (RN-AUD-14).
+ * Testado isolado, direto na API do navegador: 44100 faz o `AudioDecoder` de
+ * quem assiste falhar de forma assíncrona e muda; 48000 funciona, com o mesmo
+ * config literal. O encoder é sempre configurado nesta taxa — quando a faixa
+ * não chega nela, `createResampler()` (RN-AUD-15) resolve a diferença.
+ */
+const OPUS_SAMPLE_RATE = 48_000;
+
 /** Teto de resolução (RN-TRX-14). A imagem é reduzida, nunca cortada. */
 const MAX_W = 1920;
 const MAX_H = 1080;
@@ -99,6 +108,11 @@ export interface Broadcaster {
   stop: (reason?: string) => void;
   changeScreen: () => Promise<MediaStream>;
   swapSound: () => Promise<MediaStreamTrack>;
+  /**
+   * Troca o som por um dispositivo de entrada — mic físico, ou um cabo
+   * virtual carregando o áudio de um app fora do navegador (RF-TRX-9).
+   */
+  useAudioInput: (deviceId: string) => Promise<MediaStreamTrack>;
   setQuality: (opts: { bitrate?: number; fps?: number; maxHeight?: number }) => void;
   getSettings: () => { bitrate: number; fps: number };
   hasSound: () => boolean;
@@ -110,8 +124,8 @@ export function createBroadcaster({
   wsUrl,
   bitrate,
   fps,
-  audio = false,
   maxHeight = MAX_H,
+  source = 'screen',
   onStatus,
   onStats,
   onEnd,
@@ -121,9 +135,15 @@ export function createBroadcaster({
   wsUrl: string;
   bitrate: number;
   fps: number;
-  audio?: boolean;
   /** Teto de altura. 720 no preset Leve; 1080 no resto (RF-TRX-11). */
   maxHeight?: number;
+  /**
+   * Tela (`getDisplayMedia`) ou câmera (`getUserMedia`) (RF-CAM-1). Câmera é
+   * só vídeo — a voz de quem transmite já vai pela call de verdade do
+   * Discord, e captar o microfone aqui de novo seria duplicar ou entrar em
+   * eco com o que a própria call já faz.
+   */
+  source?: 'screen' | 'camera';
   onStatus?: (info: BroadcastStatus) => void;
   onStats?: (stats: BroadcastStats) => void;
   onEnd?: (reason: string) => void;
@@ -135,7 +155,11 @@ export function createBroadcaster({
   let encoder: VideoEncoder | null = null;
   let reader: ReadableStreamDefaultReader<VideoFrame> | null = null;
   let audioEncoder: AudioEncoder | null = null;
+  /** Lê o que vai para o encoder — a faixa original, ou a saída do reamostrador. */
   let audioReader: ReadableStreamDefaultReader<AudioData> | null = null;
+  /** Só existem quando a faixa não chegou nativamente a 48 kHz (RN-AUD-15). */
+  let audioRawReader: ReadableStreamDefaultReader<AudioData> | null = null;
+  let audioResampler: ReturnType<typeof createResampler> | null = null;
   // Pediram som, mas a superfície escolhida traria o Discord junto. Guardado
   // para a interface poder oferecer a saída em vez de só avisar e esquecer.
   let soundBlocked = false;
@@ -157,6 +181,25 @@ export function createBroadcaster({
   let statsTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
+   * As duas preferências de fonte de áudio do `getDisplayMedia()` (RN-TRX-25a).
+   *
+   * `systemAudio` e `windowAudio` são opções de **topo**, irmãs de `video` e
+   * `audio` — não entram nas `MediaTrackConstraints`. Foi assim, aninhado
+   * dentro delas, que o código viveu por um tempo, e o navegador
+   * silenciosamente ignora o que não reconhece: parecia funcionar (não dava
+   * erro) e não fazia nada.
+   *
+   * `windowAudio: 'window'` é o que muda o jogo: manda o navegador oferecer o
+   * **som daquela janela**, isolado, em vez do som do sistema inteiro — sem
+   * ele, o seletor volta para a mistura de tudo. Existe desde o Chrome 141
+   * (meados de 2025); em navegador mais velho, a opção é ignorada e o
+   * comportamento antigo continua (sem quebrar nada).
+   */
+  function displayAudioOptions(): { systemAudio: 'exclude'; windowAudio: 'window' } {
+    return { systemAudio: 'exclude', windowAudio: 'window' };
+  }
+
+  /**
    * Restrições da captura de som (RN-TRX-25).
    *
    * Os tratamentos de voz ficam desligados: existem para microfone e, em som de
@@ -166,7 +209,6 @@ export function createBroadcaster({
    */
   function audioConstraints(): MediaTrackConstraints {
     const c: MediaTrackConstraints = {
-      systemAudio: 'include',
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,
@@ -176,10 +218,15 @@ export function createBroadcaster({
       // erro síncrono, sem `isConfigSupported()` acusar nada, só o `error`
       // calado depois. Sem pedir aqui, a faixa vem na taxa nativa do
       // dispositivo — 44100 é a mais comum em hardware de verdade — e o som
-      // nunca chegava a tocar. `ideal`, não `exact`: um dispositivo que
-      // realmente não sabe reamostrar continua transmitindo, só que sem som,
-      // em vez de a captura inteira falhar.
-      sampleRate: { ideal: 48_000 },
+      // nunca chegava a tocar.
+      //
+      // `ideal`, e só `ideal`: `getDisplayMedia()` **rejeita `exact`/`min`/
+      // `max` na hora**, com `TypeError: exact constraints are not
+      // supported` — testado direto num navegador de verdade, quebrando a
+      // transmissão inteira antes de o seletor sequer abrir. `ideal` não é
+      // garantia (o dispositivo pode devolver 44100 mesmo assim, e aí volta o
+      // buraco silencioso de antes) — mas é o único que este método aceita.
+      sampleRate: { ideal: OPUS_SAMPLE_RATE },
     };
     if (navigator.mediaDevices.getSupportedConstraints().restrictOwnAudio) {
       c.restrictOwnAudio = true;
@@ -191,26 +238,88 @@ export function createBroadcaster({
    * Devolve a faixa de som, ou null quando ela traria a call de volta em eco
    * (RN-TRX-24).
    *
-   * O som do sistema é capturado como uma mistura única, e nenhum navegador
-   * expõe um jeito de tirar um processo dela. O Windows tem essa API — é assim
-   * que o Discord nativo compartilha som sem se ouvir —, mas página web não
-   * alcança. Então "som da tela inteira" é sempre "som do sistema INTEIRO", com
-   * a saída do Discord dentro. Aba é diferente: o som sai só dali.
+   * Tela inteira continua sem som — não existe processo nenhum para isolar
+   * quando o que se compartilha é o desktop inteiro, então a mistura é sempre
+   * o sistema junto com a saída do Discord.
+   *
+   * Janela de app **passou a valer** (RN-TRX-24a): com `windowAudio: 'window'`
+   * pedido em `displayAudioOptions()`, o Chrome (141+) oferece o som só
+   * daquela janela, não a mistura do sistema — é a mesma API que o Meet e o
+   * Discord Web usam. Continua sendo um **pedido**, não garantia ("MAY ignore
+   * this hint", no texto do padrão): o código confia no que o navegador
+   * devolve, exatamente como qualquer outro site confia — não existe, em
+   * nenhum lugar da spec, um jeito de o JavaScript conferir depois se o que
+   * chegou era mesmo isolado. Navegador ou sistema sem suporte simplesmente
+   * não entrega faixa de áudio nenhuma para janela, e cai no `!audioTrack`
+   * ali embaixo — sem som, sem risco de eco.
    */
   function prepareSound(videoTrack: MediaStreamTrack, captured: MediaStream): MediaStreamTrack | null {
     const audioTrack = captured.getAudioTracks()[0];
     if (!audioTrack) return null;
 
-    if (videoTrack.getSettings().displaySurface === 'browser') return audioTrack;
+    if (videoTrack.getSettings().displaySurface !== 'monitor') return audioTrack;
 
     audioTrack.stop();
     captured.removeTrack(audioTrack);
     soundBlocked = true;
     onNotice?.(
-      'A tela inteira carrega o som do Discord junto, e a call se ouviria em eco. ' +
-        'Transmitindo sem som — use "Som de uma aba" para escolher de onde vem o áudio.'
+      'Tela inteira carrega o som do sistema junto — inclusive o do Discord —, e a call se ' +
+        'ouviria em eco. Transmitindo sem som — compartilhe a janela do app (em vez da tela ' +
+        'inteira) ou use "Som de uma aba" para escolher de onde vem o áudio.'
     );
     return null;
+  }
+
+  /**
+   * Reamostra áudio para `targetRate`, na marra, com o único jeito que a web
+   * oferece: tocar o `AudioBuffer` de origem — no formato que ele já é — num
+   * `AudioContext` rodando na taxa alvo. A diferença de clock entre os dois é
+   * o que faz a reamostragem acontecer; é assim que qualquer player de áudio
+   * do navegador já reamostra por baixo dos panos (RN-AUD-15).
+   *
+   * Existe porque `ideal` em `audioConstraints()` **não é garantia**
+   * (RN-AUD-14a): testado em produção, o pedido de 48 kHz na captura às vezes
+   * não é honrado, e a faixa chega na taxa nativa do dispositivo mesmo assim
+   * — 44100 é a mais comum em hardware de verdade, e é isso que o
+   * `AudioDecoder` de quem assiste rejeita, calado. `exact` resolveria de
+   * vez, mas `getDisplayMedia()` **recusa a chamada inteira** com `exact`
+   * (`TypeError: exact constraints are not supported` — testado direto).
+   * Sem alternativa na origem, a reamostragem tem que acontecer aqui.
+   */
+  function createResampler(
+    targetRate: number,
+    channels: number
+  ): { track: MediaStreamTrack; push: (frame: AudioData) => void; close: () => void } {
+    const ctx = new AudioContext({ sampleRate: targetRate });
+    const dest = ctx.createMediaStreamDestination();
+    // Mesmo colchão de audio.ts (RN-AUD-2): toca um pouco atrás do presente
+    // para absorver a variação de quando cada quadro chega.
+    const CUSHION = 0.05;
+    let next = 0;
+
+    function push(frame: AudioData): void {
+      const buf = ctx.createBuffer(channels, frame.numberOfFrames, frame.sampleRate);
+      for (let c = 0; c < channels; c++) {
+        const plane = new Float32Array(frame.numberOfFrames);
+        frame.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
+        buf.copyToChannel(plane, c);
+      }
+
+      const now = ctx.currentTime;
+      if (next < now + 0.005) next = now + CUSHION;
+
+      const source = ctx.createBufferSource();
+      source.buffer = buf;
+      source.connect(dest);
+      source.start(next);
+      next += buf.duration;
+    }
+
+    return {
+      track: dest.stream.getAudioTracks()[0]!,
+      push,
+      close: () => void ctx.close().catch(() => {}),
+    };
   }
 
   function onAudioEncoded(chunk: EncodedAudioChunk): void {
@@ -233,23 +342,23 @@ export function createBroadcaster({
     if (!('AudioEncoder' in window) || !('MediaStreamTrackProcessor' in window)) return;
 
     const s = track.getSettings();
-    // O `sampleRate` que a faixa relata — e é o que ela relata **depois** do
-    // pedido de 48 kHz em `audioConstraints()` (RN-AUD-14) ter sido honrado.
-    // Não force um valor aqui sem mudar o pedido de captura: `AudioEncoder`
-    // não reamostra o `AudioData` de entrada — `encode()` **lança exceção** se
-    // a taxa dele não bater exatamente com a configurada (testado direto:
-    // alimentar um encoder a 48000 com áudio marcado a 44100 dá
-    // `EncodingError: Input audio buffer is incompatible with codec
-    // parameters`). Por isso o pedido tem que acontecer na origem.
+    // A taxa que a faixa relata — e não necessariamente a que se pediu.
+    // `audioConstraints()` pede 48 kHz com `ideal` (RN-AUD-14): `exact`
+    // resolveria de vez, mas `getDisplayMedia()` **recusa a chamada inteira**
+    // com `exact` (`TypeError: exact constraints are not supported` —
+    // testado direto), e `ideal` é só pedido — testado em produção, às vezes
+    // não é honrado, e a faixa chega na nativa do dispositivo mesmo assim
+    // (44100 é a mais comum em hardware de verdade). É o que o
+    // `AudioDecoder.configure()` de quem assiste rejeita, **de forma
+    // assíncrona e muda**: nem lança exceção, nem `isConfigSupported()`
+    // acusa nada. Som nunca tocava em nenhuma transmissão cujo dispositivo
+    // não desse 48 kHz de bandeja.
     //
-    // A causa do "sem áudio nunca": sem o pedido, a faixa vinha na taxa nativa
-    // do dispositivo — 44100 é a mais comum em hardware de verdade — e o
-    // `AudioDecoder.configure()` de quem assiste falhava com ela **de forma
-    // assíncrona**: nem lança exceção, nem `isConfigSupported()` acusa nada,
-    // só o `error` do decoder dispara depois, calado (testado isolado: 44100
-    // falha, 48000 funciona, com o mesmo config literal). Som nunca tocava em
-    // nenhuma transmissão cujo dispositivo não fosse nativamente 48 kHz.
-    const sampleRate = s.sampleRate ?? 48_000;
+    // Por isso o encoder é sempre configurado a 48 kHz, e reamostra-se aqui
+    // (RN-AUD-15) sempre que a faixa não chegou nesse valor — a única forma
+    // de garantir sem depender do navegador, do sistema ou do hardware.
+    const nativeRate = s.sampleRate ?? OPUS_SAMPLE_RATE;
+    const sampleRate = OPUS_SAMPLE_RATE;
     const numberOfChannels = Math.min(2, s.channelCount ?? 2);
 
     try {
@@ -273,7 +382,35 @@ export function createBroadcaster({
       })
     );
 
-    audioReader = new MediaStreamTrackProcessor<AudioData>({ track }).readable.getReader();
+    let encodeSource = track;
+
+    if (nativeRate !== sampleRate) {
+      // A faixa original alimenta o reamostrador; o encoder lê a saída dele.
+      // Dois laços porque são dois relógios diferentes — ler um quadro
+      // reamostrado não é ler um quadro original, e tentar fundir os dois
+      // num laço só significava travar um esperando o outro.
+      const resampler = createResampler(sampleRate, numberOfChannels);
+      audioResampler = resampler;
+      encodeSource = resampler.track;
+
+      audioRawReader = new MediaStreamTrackProcessor<AudioData>({ track }).readable.getReader();
+      void (async () => {
+        while (running) {
+          let raw: AudioData;
+          try {
+            const { done, value } = await audioRawReader!.read();
+            if (done || !value) break;
+            raw = value;
+          } catch {
+            break;
+          }
+          resampler.push(raw);
+          raw.close();
+        }
+      })();
+    }
+
+    audioReader = new MediaStreamTrackProcessor<AudioData>({ track: encodeSource }).readable.getReader();
     while (running) {
       let data: AudioData;
       try {
@@ -552,6 +689,10 @@ export function createBroadcaster({
     reader = null;
     void audioReader?.cancel().catch(() => {});
     audioReader = null;
+    void audioRawReader?.cancel().catch(() => {});
+    audioRawReader = null;
+    audioResampler?.close();
+    audioResampler = null;
 
     for (const e of [encoder, audioEncoder]) {
       if (e?.state === 'configured') {
@@ -633,22 +774,33 @@ export function createBroadcaster({
   async function prepare(): Promise<Preview> {
     // Precisa vir do gesto do usuário; qualquer await antes disso o invalida
     // (RN-TRX-6).
-    const captured = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: fps, max: fps } },
-      audio: audio ? audioConstraints() : false,
-    });
+    const captured =
+      source === 'camera'
+        ? await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', frameRate: { ideal: fps, max: fps } },
+          })
+        : // Sempre pedido (RN-TRX-24c): quem decide se aquela transmissão leva
+          // som é o checkbox do seletor nativo do navegador, não este código.
+          await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: { ideal: fps, max: fps } },
+            audio: audioConstraints(),
+            ...displayAudioOptions(),
+          });
     stream = captured;
 
     const track = captured.getVideoTracks()[0];
     if (!track) {
       cleanup();
-      throw new Error('A captura veio sem imagem.');
+      throw new Error(source === 'camera' ? 'A câmera não devolveu imagem.' : 'A captura veio sem imagem.');
     }
 
-    // Diz ao encoder que o conteúdo é tela (texto/UI), não vídeo natural —
-    // preserva nitidez das bordas em vez de suavizar (RN-TRX-15).
-    track.contentHint = 'text';
-    track.addEventListener('ended', () => stop('Você parou o compartilhamento pelo navegador.'));
+    // 'text' preserva nitidez de borda — o que uma tela de app/texto quer.
+    // Câmera é o oposto: vídeo natural quer suavização, não borda dura, e o
+    // hint padrão ('motion') já faz isso sozinho (RN-CAM-2).
+    if (source === 'screen') track.contentHint = 'text';
+    track.addEventListener('ended', () =>
+      stop(source === 'camera' ? 'Você desligou a câmera.' : 'Você parou o compartilhamento pelo navegador.')
+    );
 
     const s = track.getSettings();
     const target = fitWithin(s.width ?? 1280, s.height ?? 720, maxHeight);
@@ -659,9 +811,8 @@ export function createBroadcaster({
       throw new Error('Nenhum codec de vídeo suportado por este navegador.');
     }
 
-    // O som é resolvido já na preparação: é o que permite oferecer "Som de uma
-    // aba" antes de alguém ver a tela errada (RN-TRX-37).
-    const soundTrack = prepareSound(track, captured);
+    // Câmera é só vídeo (RF-CAM-1): sem faixa de som para resolver aqui.
+    const soundTrack = source === 'camera' ? null : prepareSound(track, captured);
     preparedTrack = track;
 
     return {
@@ -686,7 +837,7 @@ export function createBroadcaster({
     });
     encoder.configure(config);
 
-    ws?.send(JSON.stringify({ type: 'start' }));
+    ws?.send(JSON.stringify({ type: 'start', kind: source }));
 
     running = true;
     wantKeyframe = true;
@@ -738,6 +889,7 @@ export function createBroadcaster({
     const choice = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: audioConstraints(),
+      ...displayAudioOptions(),
     });
 
     const audioTrack = choice.getAudioTracks()[0];
@@ -749,14 +901,18 @@ export function createBroadcaster({
     if (!audioTrack) {
       choice.getTracks().forEach((t) => t.stop());
       throw new Error(
-        'Essa escolha veio sem som. Escolha uma aba e marque "Compartilhar o áudio da guia".'
+        'Essa escolha veio sem som. Escolha uma aba ou uma janela, e marque a opção de ' +
+          'compartilhar o áudio.'
       );
     }
 
-    if (surface !== 'browser') {
+    // Igual a prepareSound() (RN-TRX-24a): só a tela inteira é sempre a
+    // mistura do sistema. Aba e janela têm como vir isoladas.
+    if (surface === 'monitor') {
       audioTrack.stop();
       throw new Error(
-        'Só aba tem som isolado. Screen inteira traria o Discord junto e a call se ouviria.'
+        'Tela inteira traria o Discord junto, e a call se ouviria em eco. Escolha uma aba ' +
+          'ou uma janela.'
       );
     }
 
@@ -764,6 +920,10 @@ export function createBroadcaster({
     // alimentam o mesmo encoder e a fila estoura.
     await audioReader?.cancel().catch(() => {});
     audioReader = null;
+    await audioRawReader?.cancel().catch(() => {});
+    audioRawReader = null;
+    audioResampler?.close();
+    audioResampler = null;
     if (audioEncoder?.state === 'configured') {
       try {
         audioEncoder.close();
@@ -780,6 +940,67 @@ export function createBroadcaster({
   }
 
   /**
+   * Troca o som por um dispositivo de entrada (RF-TRX-9).
+   *
+   * A saída real para quem compartilha um app **fora do navegador**: nenhuma
+   * API web isola o áudio de um processo alheio (RN-TRX-24b) — nem
+   * `windowAudio`, que só alcança o que o próprio navegador (ou outra janela
+   * dele) está tocando. Um cabo de áudio virtual — VB-Cable no Windows,
+   * BlackHole ou Loopback no Mac — resolve fora da web: o app de origem manda
+   * o som para lá, e o cabo aparece no sistema como um microfone comum, que
+   * `getUserMedia()` capta sem restrição nenhuma, isolado por construção — é
+   * o mesmo dispositivo, então é só ele que chega.
+   *
+   * `deviceId` vem de `navigator.mediaDevices.enumerateDevices()`, filtrado a
+   * `audioinput`. Os tratamentos de voz ficam desligados pelo mesmo motivo de
+   * `audioConstraints()`: um cabo virtual não é uma voz para "limpar".
+   */
+  async function useAudioInput(deviceId: string): Promise<MediaStreamTrack> {
+    const picked = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: { exact: deviceId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        // `exact` funciona aqui — `getUserMedia()` aceita, diferente de
+        // `getDisplayMedia()` (ver `audioConstraints()`). Falhar alto na
+        // hora, se o dispositivo não souber reamostrar, é melhor que
+        // transmitir com som quebrado sem ninguém saber.
+        sampleRate: { exact: OPUS_SAMPLE_RATE },
+      },
+    });
+
+    const audioTrack = picked.getAudioTracks()[0];
+    if (!audioTrack) {
+      picked.getTracks().forEach((t) => t.stop());
+      throw new Error('Não consegui captar esse dispositivo de áudio.');
+    }
+
+    // Mesma limpeza de swapSound() (RN-TRX-28): encerra o laço anterior antes
+    // de abrir outro, senão os dois alimentam o mesmo encoder e a fila
+    // estoura.
+    await audioReader?.cancel().catch(() => {});
+    audioReader = null;
+    await audioRawReader?.cancel().catch(() => {});
+    audioRawReader = null;
+    audioResampler?.close();
+    audioResampler = null;
+    if (audioEncoder?.state === 'configured') {
+      try {
+        audioEncoder.close();
+      } catch {
+        // já fechado
+      }
+    }
+    audioEncoder = null;
+
+    soundBlocked = false;
+    audioTrack.addEventListener('ended', () => onNotice?.('O dispositivo de áudio foi desconectado.'));
+    void pumpAudio(audioTrack);
+    return audioTrack;
+  }
+
+  /**
    * Troca a tela compartilhada sem derrubar a transmissão (RF-TRX-8).
    *
    * A conexão, o encoder e o slot continuam os mesmos — quem assiste só vê a
@@ -788,7 +1009,8 @@ export function createBroadcaster({
   async function changeScreen(): Promise<MediaStream> {
     const fresh = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: fps, max: fps } },
-      audio: audio ? audioConstraints() : false,
+      audio: audioConstraints(),
+      ...displayAudioOptions(),
     });
 
     const previous = stream;
@@ -821,6 +1043,10 @@ export function createBroadcaster({
     // A tela nova traz a própria faixa de som; a antiga morreu com o stream.
     await audioReader?.cancel().catch(() => {});
     audioReader = null;
+    await audioRawReader?.cancel().catch(() => {});
+    audioRawReader = null;
+    audioResampler?.close();
+    audioResampler = null;
     const newAudio = prepareSound(track, fresh);
     if (newAudio && audioEncoder) void pumpAudio(newAudio);
 
@@ -868,6 +1094,7 @@ export function createBroadcaster({
     stop,
     changeScreen,
     swapSound,
+    useAudioInput,
     setQuality,
     getSettings: () => ({ bitrate, fps }),
     hasSound: () => Boolean(audioEncoder),

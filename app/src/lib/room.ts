@@ -89,7 +89,7 @@ export interface RoomHandlers {
    * Só para quem começa: entrar numa sala com três telas no ar não dispara três
    * avisos — a grade já mostra as três (RN-AST-32).
    */
-  onStreamStart?: (slot: number, userId: string) => void;
+  onStreamStart?: (slot: number, userId: string, kind: 'screen' | 'camera') => void;
   /**
    * A sala fechou entre o token e a conexão, ou enquanto estávamos nela
    * (RF-SAL-7). Na Activity o cliente recria e volta para a sala da call; no
@@ -128,7 +128,7 @@ export class RoomConnection {
   #streams = new Map<number, Stream>();
 
   /** Transmissões anunciadas, assistidas ou não. Assistir é opt-in (RN-AST-2). */
-  #available = new Map<number, { userId: string; config: RawVideoConfig | null }>();
+  #available = new Map<number, { userId: string; config: RawVideoConfig | null; kind: 'screen' | 'camera' }>();
   #watching = new Set<number>();
   #drawing = new Set<number>();
 
@@ -244,7 +244,7 @@ export class RoomConnection {
       case 'state': {
         const alive = new Set((msg.streams ?? []).map((s) => s.slot));
         for (const s of msg.streams ?? []) {
-          const info = this.#available.get(s.slot) ?? { userId: s.userId, config: null };
+          const info = this.#available.get(s.slot) ?? { userId: s.userId, config: null, kind: s.kind };
           this.#available.set(s.slot, info);
         }
         // Limpa o que sumiu sem `stream-stop` — queda abrupta (RN-AST-27).
@@ -269,11 +269,11 @@ export class RoomConnection {
       case 'stream-start':
         // Só anuncia; ninguém assiste até pedir. Transmissão nova zera todo
         // mundo (RN-AST-6).
-        this.#available.set(msg.slot, { userId: msg.userId, config: null });
+        this.#available.set(msg.slot, { userId: msg.userId, config: null, kind: msg.kind });
         this.#watching.delete(msg.slot);
         this.#closeStream(msg.slot);
         this.#publishSets();
-        this.#handlers.onStreamStart?.(msg.slot, msg.userId);
+        this.#handlers.onStreamStart?.(msg.slot, msg.userId, msg.kind);
         break;
 
       case 'config': {
@@ -601,11 +601,13 @@ export class RoomConnection {
    * Pede ao servidor que encerre a **própria** transmissão (RF-TRX-9).
    *
    * A aba externa tem conexão própria, então só o servidor consegue mandá-la
-   * parar (RN-TRX-31). Ele resolve por `uid` e encerra só a de quem pediu —
-   * ninguém derruba a tela de outra pessoa (RN-PRO-16).
+   * parar (RN-TRX-31). Ele resolve por `uid` + `kind` e encerra só a de quem
+   * pediu — ninguém derruba a tela (ou a câmera) de outra pessoa (RN-PRO-16).
+   * Tela e câmera são transmissões independentes (RF-CAM-3): parar uma não
+   * mexe na outra.
    */
-  requestStop(): void {
-    this.#send({ type: 'stop-broadcast' });
+  requestStop(kind: 'screen' | 'camera'): void {
+    this.#send({ type: 'stop-broadcast', kind });
   }
 
   /** Troca o nome exibido, agora e nas reconexões seguintes (RF-SES-7). */

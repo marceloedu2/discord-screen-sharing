@@ -28,6 +28,8 @@ export interface Broadcast {
   streaming: boolean;
   config: CodecConfig | null;
   audioConfig: CodecConfig | null;
+  /** Tela ou câmera (RF-CAM-1) — só muda o ícone de quem assiste, nunca o relay. */
+  kind: 'screen' | 'camera';
 }
 
 export interface Viewer {

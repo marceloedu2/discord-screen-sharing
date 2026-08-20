@@ -37,20 +37,31 @@ function tokenOf(shareUrl: string): string | null {
   }
 }
 
-/** A URL da aba de captura, já configurada (RN-TRX-7). */
-export function tabUrl(tokens: RoomTokens, preset: Preset, sound: boolean): string {
+/**
+ * A URL da aba de captura, já configurada (RN-TRX-7).
+ *
+ * Sem `?sound=`: o pedido de áudio é sempre feito, e quem decide se aquela
+ * transmissão leva som é o checkbox nativo do seletor do navegador
+ * (RN-TRX-24c) — não sobra parâmetro nenhum para carregar essa escolha.
+ *
+ * `?source=` (RF-CAM-1) diz à aba se é `getDisplayMedia` ou `getUserMedia`
+ * que ela deve chamar — vem só aqui porque só a aba externa precisa saber
+ * disso antes de decidir o que pedir; o caminho de dentro da Activity recebe
+ * `source` direto, por argumento.
+ */
+export function tabUrl(tokens: RoomTokens, preset: Preset, source: 'screen' | 'camera'): string {
   const url = new URL(tokens.shareUrl);
   url.searchParams.set('q', String(preset.bitrate));
   url.searchParams.set('fps', String(preset.fps));
-  url.searchParams.set('sound', sound ? '1' : '0');
   url.searchParams.set('preset', preset.id);
+  url.searchParams.set('source', source);
   return url.toString();
 }
 
 export async function startBroadcast(
   tokens: RoomTokens,
   preset: Preset,
-  sound: boolean,
+  source: 'screen' | 'camera',
   wsUrl: (path: string) => string,
   handlers: { onEnd?: (reason: string) => void; onNotice?: (m: string) => void } = {}
 ): Promise<BroadcastResult> {
@@ -58,11 +69,15 @@ export async function startBroadcast(
 
   if (token) {
     const broadcaster = createBroadcaster({
-      wsUrl: wsUrl(`/ws?t=${encodeURIComponent(token)}`),
+      // `kind` na URL do WS, não `source`: é o nome que o protocolo usa do
+      // lado do servidor (RF-CAM-3) — a checagem de duplicata por pessoa
+      // precisa saber qual das duas transmissões é essa antes de `start`
+      // chegar.
+      wsUrl: wsUrl(`/ws?t=${encodeURIComponent(token)}&kind=${source}`),
       bitrate: preset.bitrate,
       fps: preset.fps,
       maxHeight: preset.maxHeight,
-      audio: sound,
+      source,
       ...handlers,
     });
 
@@ -84,7 +99,7 @@ export async function startBroadcast(
     }
   }
 
-  return openTab(tabUrl(tokens, preset, sound));
+  return openTab(tabUrl(tokens, preset, source));
 }
 
 /**

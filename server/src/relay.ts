@@ -41,13 +41,17 @@ export function mountRelay(server: Server): WebSocketServer {
       return;
     }
 
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, claims));
+    // Vem na URL, e não em `start` (RF-CAM-3): a checagem de duplicata e o
+    // slot têm que acontecer na conexão, antes de qualquer mensagem chegar.
+    const kind = url.searchParams.get('kind') === 'camera' ? 'camera' : 'screen';
+
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, claims, kind));
   });
 
   return wss;
 }
 
-wss.on('connection', (ws: WebSocket, _req: unknown, claims: Claims) => {
+wss.on('connection', (ws: WebSocket, _req: unknown, claims: Claims, kind: 'screen' | 'camera') => {
   alive.add(ws);
   ws.on('pong', () => alive.add(ws));
 
@@ -63,14 +67,14 @@ wss.on('connection', (ws: WebSocket, _req: unknown, claims: Claims) => {
   const info: Person = { id: claims.uid, name: claims.name, avatar: claims.av ?? null };
 
   if (claims.role === 'broadcaster') {
-    handleBroadcaster(ws, room, info);
+    handleBroadcaster(ws, room, info, kind);
   } else {
     handleViewer(ws, room, info);
   }
 });
 
-function handleBroadcaster(ws: WebSocket, room: Room, info: Person): void {
-  const attached = rooms.attachBroadcaster(room, ws, info);
+function handleBroadcaster(ws: WebSocket, room: Room, info: Person, kind: 'screen' | 'camera'): void {
+  const attached = rooms.attachBroadcaster(room, ws, info, kind);
 
   if (typeof attached === 'string') {
     rooms.sendJson(ws, { type: 'error', message: attached });
@@ -93,7 +97,7 @@ function handleBroadcaster(ws: WebSocket, room: Room, info: Person): void {
     switch (msg.type) {
       case 'start':
         rooms.startStream(room, broadcast);
-        console.log(`[room ${room.id}] stream iniciada por ${info.name}`);
+        console.log(`[room ${room.id}] stream (${kind}) iniciada por ${info.name}`);
         break;
       case 'config':
         if (msg.config) {
@@ -168,12 +172,14 @@ function handleViewer(ws: WebSocket, room: Room, info: Person): void {
     }
 
     // Encerrar a própria transmissão de dentro da Activity, sem ter que achar
-    // a aba de captura. Cada um só encerra a sua.
+    // a aba de captura. Cada um só encerra a sua — e agora precisa dizer
+    // qual: tela e câmera são duas transmissões independentes (RF-CAM-3).
     if (msg.type === 'stop-broadcast') {
-      const mine = rooms.broadcasterOf(room, info.id);
+      const kind = msg.kind === 'camera' ? 'camera' : 'screen';
+      const mine = rooms.broadcasterOf(room, info.id, kind);
       if (mine) {
         rooms.sendJson(mine.ws, { type: 'stop-request' });
-        console.log(`[room ${room.id}] parada pedida por ${info.name}`);
+        console.log(`[room ${room.id}] parada de ${kind} pedida por ${info.name}`);
       }
     }
   });
@@ -192,6 +198,8 @@ interface ControlMessage {
   slot?: unknown;
   name?: unknown;
   config?: CodecConfig;
+  /** Tela ou câmera, em `stop-broadcast` (RF-CAM-3). Qualquer coisa != 'camera' vira 'screen'. */
+  kind?: unknown;
 }
 
 function asJson(data: RawData): ControlMessage | null {
