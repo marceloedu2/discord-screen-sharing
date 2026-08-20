@@ -16,12 +16,22 @@
  *
  * As mensagens JSON e o cabeçalho binário são contrato herdado — `.claude/.claude/specs/09-protocolo.md`. Nada aqui pode mudar de nome sem quebrar o cliente antigo.
  */
-import crypto from 'node:crypto';
+import crypto from "node:crypto";
 
-import type { WebSocket } from 'ws';
-import type { Broadcast, CodecConfig, PasswordHash, Person, Room, Viewer } from './types.ts';
+import type { WebSocket } from "ws";
+import type {
+  Broadcast,
+  CodecConfig,
+  PasswordHash,
+  Person,
+  Room,
+  Viewer,
+} from "./types.ts";
 
-const MAX_BROADCASTERS = 4;
+// 256, e não um teto de produto: o slot vai carimbado num único byte no
+// cabeçalho binário (`[1B slot]...`, `.claude/specs/09-protocolo.md`), e esse
+// é o único limite real de quantas transmissões cabem numa sala.
+const MAX_BROADCASTERS = 256;
 
 /**
  * A chave real de `room.broadcasters` (RF-CAM-3): uma pessoa pode ter **até
@@ -30,10 +40,12 @@ const MAX_BROADCASTERS = 4;
  * existia uma transmissão por pessoa; agora o par uid+kind é que identifica
  * uma transmissão.
  */
-const broadcastKey = (uid: string, kind: 'screen' | 'camera'): string => `${uid}:${kind}`;
+const broadcastKey = (uid: string, kind: "screen" | "camera"): string =>
+  `${uid}:${kind}`;
 
 const isBroadcasting = (room: Room, uid: string): boolean =>
-  room.broadcasters.has(broadcastKey(uid, 'screen')) || room.broadcasters.has(broadcastKey(uid, 'camera'));
+  room.broadcasters.has(broadcastKey(uid, "screen")) ||
+  room.broadcasters.has(broadcastKey(uid, "camera"));
 
 /**
  * Teto de espectadores **por transmissão** (RF-AST-11).
@@ -96,7 +108,10 @@ const rooms = new Map<string, Room>();
 
 // --------------------------------------------------------------------- senha
 
-function hashPassword(password: string, salt: Buffer = crypto.randomBytes(16)): PasswordHash {
+function hashPassword(
+  password: string,
+  salt: Buffer = crypto.randomBytes(16),
+): PasswordHash {
   return { salt, hash: crypto.scryptSync(password, salt, 32) };
 }
 
@@ -120,14 +135,17 @@ function lockoutRemaining(room: Room): number | null {
 
 export type PasswordVerdict =
   | { ok: true }
-  | { ok: false; reason: 'password' }
-  | { ok: false; reason: 'locked'; seconds: number };
+  | { ok: false; reason: "password" }
+  | { ok: false; reason: "locked"; seconds: number };
 
-export function checkPassword(room: Room, password: string | undefined): PasswordVerdict {
+export function checkPassword(
+  room: Room,
+  password: string | undefined,
+): PasswordVerdict {
   const locked = lockoutRemaining(room);
-  if (locked !== null) return { ok: false, reason: 'locked', seconds: locked };
+  if (locked !== null) return { ok: false, reason: "locked", seconds: locked };
 
-  if (passwordMatches(room, password ?? '')) {
+  if (passwordMatches(room, password ?? "")) {
     room.attempts = [];
     return { ok: true };
   }
@@ -138,14 +156,22 @@ export function checkPassword(room: Room, password: string | undefined): Passwor
 
   if (room.attempts.length >= MAX_ATTEMPTS) {
     room.lockedUntil = now + LOCKOUT_MS;
-    return { ok: false, reason: 'locked', seconds: Math.ceil(LOCKOUT_MS / 1000) };
+    return {
+      ok: false,
+      reason: "locked",
+      seconds: Math.ceil(LOCKOUT_MS / 1000),
+    };
   }
-  return { ok: false, reason: 'password' };
+  return { ok: false, reason: "password" };
 }
 
 /** Só o dono mexe na senha. Passar vazio remove. @returns erro, ou null. */
-export function setPassword(room: Room, uid: string, password: string | null): string | null {
-  if (room.ownerId !== uid) return 'Só quem criou a sala pode mudar a senha.';
+export function setPassword(
+  room: Room,
+  uid: string,
+  password: string | null,
+): string | null {
+  if (room.ownerId !== uid) return "Só quem criou a sala pode mudar a senha.";
 
   room.password = password ? hashPassword(String(password)) : null;
   room.attempts = [];
@@ -163,7 +189,7 @@ function blankRoom(id: string, instance: string, name: string): Room {
     name,
     isCall: false,
     ownerId: null,
-    ownerName: '',
+    ownerName: "",
     password: null,
     attempts: [],
     lockedUntil: 0,
@@ -183,16 +209,27 @@ export function createRoom(input: {
   ownerName: string;
   password?: string | null;
 }): { room: Room } | { error: string } {
-  const open = [...rooms.values()].filter((r) => r.instance === input.instance).length;
+  const open = [...rooms.values()].filter(
+    (r) => r.instance === input.instance,
+  ).length;
   if (open >= MAX_ROOMS_PER_INSTANCE) {
-    return { error: 'Limite de salas abertas atingido. Feche uma antes de criar outra.' };
+    return {
+      error:
+        "Limite de salas abertas atingido. Feche uma antes de criar outra.",
+    };
   }
 
-  const chosen = String(input.name ?? '').replace(/\s+/g, ' ').trim();
+  const chosen = String(input.name ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   // Nome é opcional: sem ele, um baseado em quem criou.
   const name = (chosen || `Sala de ${input.ownerName}`).slice(0, MAX_ROOM_NAME);
 
-  const room = blankRoom(crypto.randomBytes(6).toString('base64url'), input.instance, name);
+  const room = blankRoom(
+    crypto.randomBytes(6).toString("base64url"),
+    input.instance,
+    name,
+  );
   room.ownerId = input.ownerId;
   room.ownerName = input.ownerName;
   room.password = input.password ? hashPassword(String(input.password)) : null;
@@ -202,7 +239,7 @@ export function createRoom(input: {
 }
 
 export const getRoom = (id: unknown): Room | null =>
-  typeof id === 'string' ? (rooms.get(id) ?? null) : null;
+  typeof id === "string" ? (rooms.get(id) ?? null) : null;
 
 /**
  * A sala fixa de uma call: id derivado do canal, criada na primeira entrada.
@@ -210,7 +247,11 @@ export const getRoom = (id: unknown): Room | null =>
  * Não tem dono nem senha — quem controla o acesso é a própria call, já que só
  * entra quem o Discord confirmou estar conectado ao canal.
  */
-export function ensureCallRoom(instance: string, id: string, name?: string | null): Room {
+export function ensureCallRoom(
+  instance: string,
+  id: string,
+  name?: string | null,
+): Room {
   const existing = rooms.get(id);
   if (existing) {
     // A instância da Activity muda a cada relançamento no mesmo canal; o canal
@@ -221,9 +262,9 @@ export function ensureCallRoom(instance: string, id: string, name?: string | nul
     return existing;
   }
 
-  const room = blankRoom(id, instance, name || 'Sala da call');
+  const room = blankRoom(id, instance, name || "Sala da call");
   room.isCall = true;
-  room.ownerName = 'a call';
+  room.ownerName = "a call";
 
   rooms.set(id, room);
   return room;
@@ -293,7 +334,8 @@ function send(ws: WebSocket, data: string | Buffer): boolean {
   return true;
 }
 
-export const sendJson = (ws: WebSocket, obj: unknown): boolean => send(ws, JSON.stringify(obj));
+export const sendJson = (ws: WebSocket, obj: unknown): boolean =>
+  send(ws, JSON.stringify(obj));
 
 function toViewers(room: Room, obj: unknown): void {
   const msg = JSON.stringify(obj);
@@ -314,7 +356,7 @@ function warnDropped(viewer: Viewer, slot: number): void {
   const now = Date.now();
   if (now - (viewer.notifiedAt ?? 0) < DROP_NOTICE_MS) return;
   viewer.notifiedAt = now;
-  sendJson(viewer.ws, { type: 'dropped', slot });
+  sendJson(viewer.ws, { type: "dropped", slot });
 }
 
 function watchersOf(room: Room, slot: number): Person[] {
@@ -347,7 +389,7 @@ function roomState(room: Room) {
   participants.sort((a, b) => Number(b.broadcasting) - Number(a.broadcasting));
 
   return {
-    type: 'state',
+    type: "state",
     room: {
       id: room.id,
       name: room.name,
@@ -359,7 +401,12 @@ function roomState(room: Room) {
     participants,
     streams: [...room.broadcasters.values()]
       .filter((b) => b.streaming)
-      .map((b) => ({ slot: b.slot, userId: b.info.id, kind: b.kind, watchers: watchersOf(room, b.slot) })),
+      .map((b) => ({
+        slot: b.slot,
+        userId: b.info.id,
+        kind: b.kind,
+        watchers: watchersOf(room, b.slot),
+      })),
   };
 }
 
@@ -371,9 +418,9 @@ export function broadcastState(room: Room): void {
 
 export function rename(room: Room, ws: WebSocket, raw: unknown): void {
   const viewer = room.viewers.get(ws);
-  if (!viewer || typeof raw !== 'string') return;
+  if (!viewer || typeof raw !== "string") return;
 
-  const name = raw.replace(/\s+/g, ' ').trim().slice(0, MAX_NAME);
+  const name = raw.replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
   if (!name) return;
 
   viewer.info = { ...viewer.info, name };
@@ -402,19 +449,19 @@ export function attachBroadcaster(
   room: Room,
   ws: WebSocket,
   info: Person,
-  kind: 'screen' | 'camera'
+  kind: "screen" | "camera",
 ): Broadcast | string {
   if (room.broadcasters.has(broadcastKey(info.id, kind))) {
-    return kind === 'camera'
-      ? 'Sua câmera já está ligada nesta sala.'
-      : 'Você já está compartilhando a tela nesta sala.';
+    return kind === "camera"
+      ? "Sua câmera já está ligada nesta sala."
+      : "Você já está compartilhando a tela nesta sala.";
   }
   if (room.broadcasters.size >= MAX_BROADCASTERS) {
     return `Limite de ${MAX_BROADCASTERS} transmissões simultâneas atingido.`;
   }
 
   const slot = freeSlot(room);
-  if (slot === null) return 'Sem espaço para mais transmissões.';
+  if (slot === null) return "Sem espaço para mais transmissões.";
 
   const broadcast: Broadcast = {
     ws,
@@ -429,7 +476,7 @@ export function attachBroadcaster(
   room.slots.set(slot, broadcast);
   room.emptySince = null;
 
-  sendJson(ws, { type: 'slot', slot });
+  sendJson(ws, { type: "slot", slot });
   broadcastState(room);
   return broadcast;
 }
@@ -443,7 +490,12 @@ export function startStream(room: Room, b: Broadcast): void {
     v.primed.delete(b.slot);
     v.watching.delete(b.slot);
   }
-  toViewers(room, { type: 'stream-start', slot: b.slot, userId: b.info.id, kind: b.kind });
+  toViewers(room, {
+    type: "stream-start",
+    slot: b.slot,
+    userId: b.info.id,
+    kind: b.kind,
+  });
   broadcastState(room);
 }
 
@@ -454,11 +506,15 @@ export function startStream(room: Room, b: Broadcast): void {
  * ao contrário do vídeo, aqui não existe keyframe para servir de ponto de
  * partida: sem a config, nenhum pacote de som é aproveitável.
  */
-export function setAudioConfig(room: Room, b: Broadcast, config: CodecConfig): void {
+export function setAudioConfig(
+  room: Room,
+  b: Broadcast,
+  config: CodecConfig,
+): void {
   b.audioConfig = config;
   for (const v of room.viewers.values()) {
     if (v.watching.has(b.slot)) {
-      sendJson(v.ws, { type: 'audio-config', slot: b.slot, config });
+      sendJson(v.ws, { type: "audio-config", slot: b.slot, config });
     }
   }
 }
@@ -469,7 +525,8 @@ export function setConfig(room: Room, b: Broadcast, config: CodecConfig): void {
   // keyframe.
   for (const v of room.viewers.values()) {
     v.primed.delete(b.slot);
-    if (v.watching.has(b.slot)) sendJson(v.ws, { type: 'config', slot: b.slot, config });
+    if (v.watching.has(b.slot))
+      sendJson(v.ws, { type: "config", slot: b.slot, config });
   }
 }
 
@@ -539,7 +596,7 @@ export function stopStream(room: Room, b: Broadcast): void {
     v.primed.delete(b.slot);
     v.watching.delete(b.slot);
   }
-  toViewers(room, { type: 'stream-stop', slot: b.slot });
+  toViewers(room, { type: "stream-stop", slot: b.slot });
 }
 
 export function detachBroadcaster(room: Room, b: Broadcast): void {
@@ -554,8 +611,11 @@ export function detachBroadcaster(room: Room, b: Broadcast): void {
   broadcastState(room);
 }
 
-export const broadcasterOf = (room: Room, uid: string, kind: 'screen' | 'camera'): Broadcast | null =>
-  room.broadcasters.get(broadcastKey(uid, kind)) ?? null;
+export const broadcasterOf = (
+  room: Room,
+  uid: string,
+  kind: "screen" | "camera",
+): Broadcast | null => room.broadcasters.get(broadcastKey(uid, kind)) ?? null;
 
 // ----------------------------------------------------------------- espectador
 
@@ -568,19 +628,23 @@ export function watch(room: Room, ws: WebSocket, slot: number): void {
   if (viewer.watching.has(slot)) return;
 
   if (watchersOf(room, slot).length >= MAX_VIEWERS_PER_STREAM) {
-    sendJson(ws, { type: 'error', message: 'Esta tela já está no limite de espectadores.' });
+    sendJson(ws, {
+      type: "error",
+      message: "Esta tela já está no limite de espectadores.",
+    });
     return;
   }
 
   viewer.watching.add(slot);
   viewer.primed.delete(slot);
 
-  if (b.config) sendJson(ws, { type: 'config', slot, config: b.config });
-  if (b.audioConfig) sendJson(ws, { type: 'audio-config', slot, config: b.audioConfig });
+  if (b.config) sendJson(ws, { type: "config", slot, config: b.config });
+  if (b.audioConfig)
+    sendJson(ws, { type: "audio-config", slot, config: b.audioConfig });
 
   // Em vez de guardar um keyframe antigo, pedimos um novo: a tela aparece em
   // ~1 quadro, e o servidor não precisa segurar buffer de ninguém.
-  sendJson(b.ws, { type: 'need-keyframe' });
+  sendJson(b.ws, { type: "need-keyframe" });
   broadcastState(room);
 }
 
@@ -604,9 +668,10 @@ export function rewatch(room: Room, ws: WebSocket, slot: number): void {
   const b = room.slots.get(slot);
   if (!viewer || !b || !b.streaming || !viewer.watching.has(slot)) return;
 
-  if (b.config) sendJson(ws, { type: 'config', slot, config: b.config });
-  if (b.audioConfig) sendJson(ws, { type: 'audio-config', slot, config: b.audioConfig });
-  sendJson(b.ws, { type: 'need-keyframe' });
+  if (b.config) sendJson(ws, { type: "config", slot, config: b.config });
+  if (b.audioConfig)
+    sendJson(ws, { type: "audio-config", slot, config: b.audioConfig });
+  sendJson(b.ws, { type: "need-keyframe" });
 }
 
 export function unwatch(room: Room, ws: WebSocket, slot: number): void {
@@ -627,7 +692,7 @@ export function attachViewer(room: Room, ws: WebSocket, info: Person): void {
   // Anuncia o que está no ar, sem começar a mandar quadros: assistir é opt-in.
   for (const b of room.broadcasters.values()) {
     if (!b.streaming) continue;
-    sendJson(ws, { type: 'stream-start', slot: b.slot, userId: b.info.id });
+    sendJson(ws, { type: "stream-start", slot: b.slot, userId: b.info.id });
   }
 
   broadcastState(room);

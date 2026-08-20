@@ -101,9 +101,11 @@ com doze espectadores cada é banda de quatro transmissores diferentes.
 lateral (`RN-AST-11`): é preferência de quem assiste. O padrão continua sendo
 Foco na primeira transmissão da sessão.
 
-`RN-AST-30` · novo · P2 — Em Grade, várias telas assistidas ao mesmo tempo
-significam vários decodificadores ativos. O teto de 4 transmissores por sala
-(`RN-TRX-9`) já limita isso; nenhuma mudança adicional é necessária.
+`RN-AST-30` · alterado · P2 — Em Grade, várias telas assistidas ao mesmo tempo
+significam vários decodificadores ativos. Não há mais teto de transmissores
+por sala (`RN-TRX-9`), mas o que decide quantos decodificadores existem nunca
+foi esse teto — é `RF-AST-1`: assistir é um pedido explícito (`watch`) por
+tela, uma pessoa não herda decodificador de tela que não clicou.
 
 ---
 

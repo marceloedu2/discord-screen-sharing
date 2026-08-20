@@ -33,11 +33,12 @@ enquanto a transmissão durar. Pode voltar ao Discord normalmente; só não fech
 
 ## Slots
 
-`RN-TRX-9` · alterado · P0 — Até **4 transmissões simultâneas** por sala — o
-teto é de transmissões, não de pessoas: uma pessoa sozinha, com tela e câmera
-ligadas, já ocupa duas (`RF-CAM-1`). Cada transmissão recebe um `slot`
-numérico (0–3), atribuído pelo servidor, que carimba no **primeiro byte de
-todo quadro**.
+`RN-TRX-9` · alterado · P0 — Sem teto de produto: quantas transmissões
+quiserem cabem numa sala. Cada transmissão recebe um `slot` numérico,
+atribuído pelo servidor, que carimba no **primeiro byte de todo quadro** — o
+único limite real é esse byte (0–255), não um número escolhido a dedo. O
+grid do cliente já escala por contagem (`columns()` em `grid.tsx`), então não
+há UI presa a um teto pequeno.
 
 `RN-TRX-10` · herdado · P0 — O servidor **confere o slot carimbado** contra o
 slot da conexão, e descarta o que não bate. Sem isso, um cliente adulterado
