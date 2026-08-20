@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+.next
+**/.next
+server/dist
+.git
+.cache
+.agent-browser
+screenshots-discord
+.env
+.env.*
+!.env.example
+*.log

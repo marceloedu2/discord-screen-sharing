@@ -1,0 +1,56 @@
+# Sobe a Sala de Tela e o túnel da Cloudflare juntos.
+#
+#   docker compose up -d --build
+#
+# O `.env` da raiz alimenta os dois serviços. Ele não entra na imagem — o
+# .dockerignore o exclui de propósito: segredo em camada de imagem viaja junto
+# com ela para todo lugar onde ela for parar.
+
+services:
+  sala:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      # Dentro do contêiner as portas são sempre estas, independente do que o
+      # .env disser para a máquina de quem desenvolve.
+      PORT: 3000
+      APP_PORT: 3100
+      RELAY_PORT: 3101
+    # Sem `ports:` quando o cloudflared está junto: quem alcança a aplicação é
+    # ele, pela rede interna do compose. Publicar a porta na máquina só faria
+    # sentido para testar sem túnel — aí descomente a linha abaixo.
+    # ports:
+    #   - "3000:3000"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - sala
+    # O token vem pela variável de ambiente, e não como argumento do comando.
+    # Passando o valor pela linha de comando, uma variável vazia deixa a flag
+    # sozinha, e o cloudflared responde "flag needs an argument" seguido de
+    # duzentas linhas de ajuda — em laço, porque o restart o traz de volta.
+    # Pelo ambiente, token vazio dá um erro que se lê.
+    #
+    # --no-autoupdate: ele se atualiza sozinho e reinicia no meio do caminho,
+    # derrubando o túnel sem explicação. Quem manda na versão aqui é a tag da
+    # imagem.
+    command: tunnel --no-autoupdate run
+    env_file: .env
+
+    # ---------------------------------------------------------------------
+    # Alternativa: reusar o túnel que o `npm run tunnel:create` já criou, sem
+    # passar pelo painel. Comente as duas linhas acima, descomente estas três,
+    # e troque <ID> pelo id do túnel (o nome do .json em ~/.cloudflared).
+    #
+    # command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    # volumes:
+    #   - ~/.cloudflared:/etc/cloudflared:ro
+    #
+    # O config.yml precisa apontar o `service` para http://sala:3000 e o
+    # `credentials-file` para /etc/cloudflared/<ID>.json — os caminhos são os de
+    # dentro do contêiner, não os da sua máquina.
+    # ---------------------------------------------------------------------

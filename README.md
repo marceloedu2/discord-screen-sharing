@@ -258,6 +258,46 @@ WebSocket.
 
 ---
 
+## Docker
+
+Uma imagem, dois contêineres: a aplicação e o túnel.
+
+```bash
+cp .env.example .env      # e preencha
+docker compose up -d --build
+```
+
+O `TUNNEL_TOKEN` **é obrigatório** e vem de **dash.cloudflare.com → Zero Trust
+→ Networks → Tunnels → o seu túnel → Configure**. É o mesmo túnel que o
+`npm run tunnel:create` cria, visto pelo outro lado — se você já rodou aquele
+comando, o túnel existe e só falta copiar o token.
+
+Vazio, o contêiner do túnel reinicia em laço: sem token o `cloudflared` não tem
+o que fazer. O `docker compose logs cloudflared` diz isso na primeira linha.
+
+Quem já tem o túnel criado localmente pode pular o painel e montar as
+credenciais que o `tunnel:create` deixou em `~/.cloudflared` — o bloco
+comentado no fim do `docker-compose.yml` mostra como.
+
+No painel do túnel, em **Public Hostname**, o serviço aponta para
+`http://sala:3000` — `sala` é o nome do contêiner na rede do compose, e 3000 é
+a porta de entrada.
+
+O `.env` **não entra na imagem**: o `.dockerignore` o exclui de propósito, e o
+compose o injeta em tempo de execução. Segredo em camada de imagem viaja junto
+com ela para todo lugar onde ela for parar.
+
+Para rodar sem túnel, descomente o bloco `ports:` do compose e abra
+<http://localhost:3000>.
+
+```bash
+docker compose logs -f sala     # o que os três processos estão dizendo
+docker compose ps               # inclui o healthcheck, que só passa com o relay de pé
+docker compose down             # derruba tudo
+```
+
+---
+
 ## Deixar no ar
 
 O [`Caddyfile`](infra/Caddyfile) já traz o roteamento certo e o certificado
