@@ -166,6 +166,15 @@ export class RoomConnection {
     name: string | null,
     handlers: RoomHandlers = {}
   ): void {
+    // Troca de sala sem passar por `disconnect()` (ex.: `room-gone`, token
+    // recusado): sem isto, o socket anterior ficava órfão no servidor até o
+    // heartbeat de 30 s derrubá-lo, e a pessoa aparecia fantasma nas duas
+    // salas enquanto isso (RN-AST-26b).
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#ws?.close();
+    this.#ws = null;
+
     this.#wsUrl = wsUrl;
     this.#tokens = tokens;
     this.#name = name;
@@ -216,6 +225,10 @@ export class RoomConnection {
     });
 
     ws.addEventListener('close', () => {
+      // Socket antigo, já substituído por uma chamada posterior a `connect()`:
+      // quem manda no estado agora é o socket novo (RN-AST-26b).
+      if (this.#ws !== ws) return;
+
       // Saímos da sala de propósito: nada a reconectar (RN-AST-26). A diferença
       // é `#tokens` ainda existir ou não.
       if (!this.#tokens) {
