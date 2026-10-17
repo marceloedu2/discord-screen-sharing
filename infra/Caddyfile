@@ -17,6 +17,7 @@ exemplo.com {
 		/api/session* /.proxy/api/session* \
 		/api/rooms/* /.proxy/api/rooms/* \
 		/api/health /.proxy/api/health \
+		/api/feedback /.proxy/api/feedback \
 		/auth/* /.proxy/auth/*
 	reverse_proxy @server 127.0.0.1:3101
 

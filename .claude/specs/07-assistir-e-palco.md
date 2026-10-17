@@ -248,3 +248,41 @@ diferença é `roomTokens` ainda existir ou não.
 `RN-AST-27` · herdado · P1 — O `state` limpa o que sumiu sem `stream-stop`
 (queda abrupta): tudo que não está na lista de streams vivos é removido de
 `available`, `streams` e `watching`.
+
+`RN-AST-34` · novo · P0 — **Reconectar retoma o que se assistia**, sem a pessoa
+fazer nada, como Meet e Discord Web. O servidor trata cada conexão como
+espectador novo (`watching` vazio) e reanuncia as transmissões com
+`stream-start`; o cliente guarda, ao cair, o par `slot` → (`userId`, `kind`) do
+que assistia e, quando o `stream-start` volta com o mesmo par, reassiste e
+**não avisa** (`RN-AST-32`). Par diferente — a pessoa parou e outra assumiu o
+slot, ou parou e voltou — é transmissão nova e segue o caminho normal. O
+`stream-start` de replay carrega `kind`, como o de início.
+
+`RN-AST-35` · novo · P1 — **Trocar de sala zera o que é da sala.** Slots,
+transmissões anunciadas, o que se assistia, contadores de quadro e de descarte
+pertencem à sala: o mesmo número de slot na sala nova é outra pessoa. Só as
+preferências de quem assiste (volume, modo, ocultar pessoas) atravessam.
+
+`RN-AST-36` · novo · P0 — **Rede fora não é token recusado.** O WebSocket não
+diz *por que* fechou sem abrir: um 401 e uma rede desligada são o mesmo
+evento. Só conclui "token recusado" (`onRejected`, `RF-SES-6`) quem **nunca
+conectou** naquela sala **e** tem o navegador online. Quem já abriu uma vez, ou
+está offline, segue tentando com o backoff de `RF-AST-10` — sem teto de
+tentativas. Antes, a primeira tentativa de reconexão que falhava com a rede
+ainda fora tirava a pessoa da sala para sempre.
+
+`RN-AST-37` · novo · P1 — **Qualidade é atraso e descarte, não fps.** `good` /
+`unstable` / `bad` saem de latência (>300 ms, >800 ms) e de descarte recente do
+servidor. Captura de tela só emite quadro quando algo muda, e o preset Leve é
+15 fps; julgar por uma meta fixa de quadros marcava transmissões saudáveis como
+ruins. Decodificador lento aparece como atraso crescente, rede lenta como
+descarte — os dois já estão cobertos.
+
+`RN-UI-40` · novo · P1 — **Aviso some em 6 s, sempre.** O prazo reinicia só
+quando a *mensagem* muda, nunca porque o componente pai re-renderizou — a sala
+re-renderiza todo segundo (amostragem de qualidade), e um prazo preso ao
+callback nunca vencia.
+
+`RN-UI-42` · novo · P1 — **Aviso com ação tem espaço de texto entre mensagem e
+botão.** A margem do botão é só visual; sem um espaço real no DOM, o leitor de
+tela (a região é `aria-live`) lia "…ligou a câmeraAssistir" como uma palavra.

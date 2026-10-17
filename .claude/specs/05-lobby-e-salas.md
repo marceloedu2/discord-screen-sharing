@@ -203,3 +203,9 @@ fechar o socket.
 
 `RN-SAL-23` · herdado · P1 — Dentro do Discord **não há botão de sair**: quem
 fecha a atividade é o próprio Discord, e não há lista para onde voltar.
+
+`RN-SAL-30` · novo · P0 — **A chave do token guardado é `sala:<id>`, sempre.** O
+porte chegou a gravar `room:<id>`, o que orfanaria a sessão de quem já usava o
+app (a pessoa voltaria a digitar a senha de toda sala). A leitura ainda aceita
+`room:<id>`, e a gravação seguinte migra para `sala:` e apaga a antiga. Vale o
+mesmo para `volume`, `volumePessoa`, `displayName`, `modo` e `pessoas`.

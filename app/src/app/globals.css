@@ -22,6 +22,11 @@
      Spec 02 manda transformar em token o que aparece fora deles. */
   --color-acento-hover: #4752c4;
   --color-perigo-hover: #c93034;
+  /* Fundo sólido com texto branco em cima (selo "AO VIVO", botão de encerrar):
+     branco sobre o --color-perigo dá 3,77:1, abaixo dos 4,5:1 que texto pequeno
+     exige. Este dá 5,3:1 e o hover, mais escuro, mantém a diferença visível. */
+  --color-perigo-solido: #c93034;
+  --color-perigo-solido-hover: #a82a2d;
 
   /* O blurple é cor de preenchimento: branco sobre ele passa com folga, mas ele
      como texto sobre o painel dá 3,58:1 — abaixo do mínimo de 4,5:1, e o axe

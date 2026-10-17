@@ -22,7 +22,7 @@ const VARIANTS: Record<Variant, string> = {
   primary: "bg-acento text-white hover:not-disabled:bg-acento-hover",
   // Você está transmitindo, ou está saindo (`.btn.live`, `.btn.leave`). Vermelho
   // e por último, como o encerrar chamada do Discord.
-  end: "bg-perigo text-white hover:not-disabled:bg-perigo-hover",
+  end: "bg-perigo-solido text-white hover:not-disabled:bg-perigo-solido-hover",
   // Algo pedido não pôde ser feito e a saída está atrás deste botão. Amarelo,
   // não vermelho: é um convite a clicar, não um erro (RF-TRX-5).
   warning: "bg-atencao text-[#111214] hover:not-disabled:bg-atencao-hover",

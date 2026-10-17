@@ -1,5 +1,5 @@
 /**
- * Screen cheia de verdade quando dá, e por layout quando não dá.
+ * Tela cheia de verdade quando dá, e por layout quando não dá.
  *
  * Fora do Discord a Fullscreen API existe e é o que a pessoa espera — é o mesmo
  * que o F11 do navegador faz. Dentro da Activity ela é **negada por Permissions

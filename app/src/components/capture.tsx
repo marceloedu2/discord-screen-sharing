@@ -281,7 +281,7 @@ export function Capture() {
           {isCamera ? "Ligar câmera" : "Compartilhar tela"}
         </h1>
         <p className="mt-1 text-suave">
-          Esta aba precisa continuar aberta enquanto você transmite. Você pode goBack ao Discord
+          Esta aba precisa continuar aberta enquanto você transmite. Você pode voltar ao Discord
           normalmente.
         </p>
       </div>

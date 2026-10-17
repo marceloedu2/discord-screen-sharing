@@ -135,7 +135,7 @@ export function Screen({
             {quality}
           </span>
         ) : null}
-        <span className={`rounded bg-perigo font-semibold tracking-wide text-white ${compact ? "px-1 py-px text-[9px]" : "px-1.5 py-0.5 text-[11px]"}`}>
+        <span className={`rounded bg-perigo-solido font-semibold tracking-wide text-white ${compact ? "px-1 py-px text-[9px]" : "px-1.5 py-0.5 text-[11px]"}`}>
           AO VIVO
         </span>
       </span>
@@ -156,7 +156,7 @@ export function Screen({
               aqui — e dizer isso é melhor que um retângulo preto (RN-AST-36). */}
           {poppedOut ? (
             <span className="absolute inset-0 grid place-items-center bg-tile text-suave">
-              Assistindo na window poppedOut
+              Assistindo na janela destacada
             </span>
           ) : null}
           {!drawing && !poppedOut ? (
@@ -183,26 +183,33 @@ export function Screen({
         <button
           type="button"
           onClick={onWatch}
-          // O rótulo é explícito porque o nome acessível calculado sairia como
-          // "<nome do avatar> Assistir tela" — o alt da imagem entra nele. E
-          // "Assistir tela" sozinho não diz de quem é a tela.
-          aria-label={isMe ? "Ver minha tela" : `Assistir a tela de ${name}`}
+          // Sem aria-label: o nome vem do conteúdo, porque o texto visível do botão
+          // (as iniciais do avatar e "Assistir a tela") tem que estar contido no
+          // nome acessível (WCAG 2.5.3) — um aria-label divergia disso. O avatar
+          // fica fora do nome (o `alt` da foto entraria nele: "<nome> Assistir
+          // tela"), e "de <nome>" vai num trecho só para leitor de tela, porque
+          // "Assistir a tela" sozinho não diz de quem é.
           className="grid h-full w-full place-items-center gap-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acento"
         >
           <span className="grid place-items-center gap-3">
             {person ? (
-              <Avatar
-                id={person.id}
-                name={person.name}
-                avatar={person.avatar}
-                className={compact ? "w-9! text-[13px]!" : ""}
-              />
+              <span aria-hidden="true" className="contents">
+                <Avatar
+                  id={person.id}
+                  name={person.name}
+                  avatar={person.avatar}
+                  className={compact ? "w-9! text-[13px]!" : ""}
+                />
+              </span>
             ) : null}
-            {/* Na miniatura o rótulo sai: em 186×104 ele encavala o name, e o
-                tile inteiro já é o botão — o `aria-label` diz o que ele faz. */}
-            {compact ? null : (
+            {/* Na miniatura o rótulo visível sai: em 186×104 ele encavala o nome, e
+                o tile inteiro já é o botão. O nome para o leitor de tela fica. */}
+            {compact ? (
+              <span className="sr-only">{isMe ? "Ver minha tela" : `Assistir a tela de ${name}`}</span>
+            ) : (
               <span className="rounded-full bg-acento px-4 py-2 text-[14px]/none font-medium text-white">
-                {isMe ? "Ver minha tela" : "Assistir tela"}
+                {isMe ? "Ver minha tela" : "Assistir a tela"}
+                {isMe ? null : <span className="sr-only"> de {name}</span>}
               </span>
             )}
           </span>

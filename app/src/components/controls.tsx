@@ -123,6 +123,12 @@ export const Icon = {
       <path d="M3 11c5-4 13-4 18 0l-2.5 3-3.5-1v-2.5a12 12 0 0 0-6 0V13l-3.5 1L3 11z" />
     </svg>
   ),
+  Feedback: () => (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+      <path d="M12 8v4.5M12 15.5v.01" />
+    </svg>
+  ),
   More: () => (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="5" cy="12" r="1.4" />

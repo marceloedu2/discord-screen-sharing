@@ -86,8 +86,18 @@ export function setPassword(
  * não uma garantia. Tokens de sala não expiram (RN-SAL-21): a sala fecha ao
  * esvaziar e o id é aleatório, então o token morre junto com ela.
  */
+/**
+ * A chave no armazenamento é `sala:<id>` (RF-SAL-9) e continua em português de
+ * propósito: é o que já está gravado no navegador de quem usa, e renomear
+ * orfanaria a sessão — a pessoa voltaria a digitar a senha de toda sala. O porte
+ * chegou a gravar `room:<id>`; a leitura ainda aceita essa, e a próxima gravação
+ * migra.
+ */
+const KEY = (roomId: string) => `sala:${roomId}`;
+const LEGACY_KEY = (roomId: string) => `room:${roomId}`;
+
 export function storedTokens(roomId: string, uid: string): RoomTokens | null {
-  const cru = read(`room:${roomId}`);
+  const cru = read(KEY(roomId)) ?? read(LEGACY_KEY(roomId));
   if (!cru) return null;
 
   let tokens: RoomTokens;
@@ -109,10 +119,15 @@ export function storedTokens(roomId: string, uid: string): RoomTokens | null {
   return tokens;
 }
 
-export const saveTokens = (tokens: RoomTokens) =>
-  store(`room:${tokens.roomId}`, JSON.stringify(tokens));
+export function saveTokens(tokens: RoomTokens): void {
+  store(KEY(tokens.roomId), JSON.stringify(tokens));
+  remove(LEGACY_KEY(tokens.roomId));
+}
 
-export const forgetTokens = (roomId: string) => remove(`room:${roomId}`);
+export function forgetTokens(roomId: string): void {
+  remove(KEY(roomId));
+  remove(LEGACY_KEY(roomId));
+}
 
 /**
  * A sala atual na barra de endereço (RF-SAL-8), em `?room=`.

@@ -213,3 +213,9 @@ axe aparecia ou não conforme o id sorteado — uma suíte intermitente, que é 
 do que uma que falha sempre. A 32% o pior matiz dá 4,75:1 e os 360 passam.
 Escurecer mais não era opção pelo outro lado: abaixo disso o círculo deixa de
 se separar de `--tile`.
+
+`RN-UI-41` · novo · P1 — **Texto branco sobre vermelho usa `perigo-solido`.**
+Branco sobre `--color-perigo` (#f23f43) dá 3,77:1, abaixo dos 4,5:1 que texto
+pequeno exige (o axe reprova). Selo "AO VIVO" e botão de encerrar usam
+`--color-perigo-solido` (#c93034, 5,3:1) e `-hover` (#a82a2d). `perigo` segue
+valendo para borda e para texto sobre fundo escuro.

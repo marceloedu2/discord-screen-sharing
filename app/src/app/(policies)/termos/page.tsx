@@ -71,7 +71,7 @@ export default function Termos() {
         <li>mostrar a tela de alguém, ou informação confidencial de alguém, sem autorização;</li>
         <li>distribuir programas maliciosos ou tentar obter acesso indevido ao serviço;</li>
         <li>sobrecarregar a infraestrutura de forma automatizada ou abusiva;</li>
-        <li>burlar a senha de uma sala ou enterRoom em sala da qual você não foi convidado.</li>
+        <li>burlar a senha de uma sala ou entrar em sala da qual você não foi convidado.</li>
       </ul>
 
       <h2>5. A sua responsabilidade pelo que transmite</h2>

@@ -17,11 +17,14 @@ export function Modal({
   title,
   sub,
   onClose,
+  wide = false,
   children,
 }: {
   title: string;
   sub?: string;
   onClose: () => void;
+  /** Formulários com vários campos pedem mais largura que os 400 px dos diálogos curtos. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   const card = useRef<HTMLDivElement>(null);
@@ -63,7 +66,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="max-h-full w-[min(400px,100%)] overflow-y-auto rounded-xl border border-linha bg-painel p-[22px] shadow-[0_16px_48px_rgba(0,0,0,0.6)] focus:outline-none"
+        className={`max-h-full ${wide ? "w-[min(520px,100%)]" : "w-[min(400px,100%)]"} overflow-y-auto rounded-xl border border-linha bg-painel p-[22px] shadow-[0_16px_48px_rgba(0,0,0,0.6)] focus:outline-none`}
       >
         <h2 className="mb-1.5 text-[19px] font-semibold text-texto">{title}</h2>
         {sub ? <p className="mb-5 text-[13.5px]/[1.5] text-suave">{sub}</p> : null}

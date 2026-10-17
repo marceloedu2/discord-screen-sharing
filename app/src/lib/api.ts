@@ -61,7 +61,7 @@ export async function post<T>(
   } catch (err) {
     const timeout = err instanceof Error && err.name === 'TimeoutError';
     throw new ApiError(
-      timeout ? 'O guild não respondeu a tempo.' : 'Não foi possível falar com o guild.',
+      timeout ? 'O servidor não respondeu a tempo.' : 'Não foi possível falar com o servidor.',
       0
     );
   }

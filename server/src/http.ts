@@ -98,7 +98,7 @@ function readJson(req: IncomingMessage): Promise<Body | null> {
  * uma exceção não tratada num handler async derrubava o processo inteiro — e
  * derrubar o processo significa derrubar toda transmissão em curso.
  */
-export function createRouter(routes: Record<string, Handler>) {
+export function createRouter(routes: Record<string, Handler>, raw: Record<string, Handler> = {}) {
   return async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // O proxy do Discord entrega o caminho com /.proxy/ na frente. Ele já
     // costuma removê-lo no HTTP, mas remover aqui também não custa nada e
@@ -107,7 +107,23 @@ export function createRouter(routes: Record<string, Handler>) {
     const url = new URL(req.url ?? '/', 'http://internal');
     const path = url.pathname.replace(/^\/\.proxy/, '') || '/';
 
-    const handler = routes[`${req.method ?? 'GET'} ${path}`];
+    const key = `${req.method ?? 'GET'} ${path}`;
+
+    // Rotas "cruas" leem o corpo por conta própria: o teto de 64 KB do leitor de
+    // JSON abaixo existe para tokens e nomes, e recusaria qualquer upload. Quem
+    // as declara assume impor o próprio teto de tamanho.
+    const rawHandler = raw[key];
+    if (rawHandler) {
+      try {
+        await rawHandler({ req, res, body: {}, query: url.searchParams });
+      } catch (err) {
+        console.error(`[http] ${key}:`, err);
+        if (!res.headersSent) fail(res, 500, 'erro interno');
+      }
+      return;
+    }
+
+    const handler = routes[key];
     if (!handler) return fail(res, 404, 'rota inexistente');
 
     let body: Body = {};

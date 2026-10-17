@@ -52,6 +52,19 @@ export function mountRelay(server: Server): WebSocketServer {
 }
 
 wss.on('connection', (ws: WebSocket, _req: unknown, claims: Claims, kind: 'screen' | 'camera') => {
+  // O `ws` emite `error` para quadro acima de `maxPayload` (1009), UTF-8
+  // inválido e protocolo violado — e `error` sem ouvinte é exceção não tratada
+  // do Node, que derruba o processo **e todas as salas** junto. Um único quadro
+  // de 5 MB de quem tem um link de transmissão bastava. O `close` que vem logo
+  // depois já faz a limpeza; aqui só impedimos que o erro escape (RN-PRO-21).
+  ws.on('error', (err) => {
+    console.warn(`[relay] conexão encerrada por erro: ${err.message}`);
+    // Sem esperar o aperto de mão de fechamento: o `ws` aguarda até 30 s pela
+    // resposta do outro lado, e quem acabou de violar o protocolo não vai
+    // cooperar. `close` dispara em seguida e faz a limpeza de sempre.
+    ws.terminate();
+  });
+
   alive.add(ws);
   ws.on('pong', () => alive.add(ws));
 

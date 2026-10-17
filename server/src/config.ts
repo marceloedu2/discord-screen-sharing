@@ -9,6 +9,13 @@ export const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || null;
 export const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || null;
 export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || null;
 
+// Para onde vão os relatos de bug e feedback (spec 12). O canal e o servidor
+// são os do Discord dos Sapekadores; as variáveis existem para trocar de canal
+// sem mexer em código, e para os testes apontarem a API para um Discord falso.
+export const FEEDBACK_CHANNEL_ID = process.env.FEEDBACK_CHANNEL_ID || '1561141729648840754';
+export const FEEDBACK_GUILD_ID = process.env.FEEDBACK_GUILD_ID || '576022672983457802';
+export const DISCORD_API_BASE = (process.env.DISCORD_API_BASE || 'https://discord.com/api/v10').replace(/[/]+$/, '');
+
 // RELAY_PORT, e não PORT: PORT é a porta de entrada — o navegador bate nela, e
 // quem atende ali roteia por caminho entre o app e este processo.
 export const PORT = Number(process.env.RELAY_PORT) || 3101;

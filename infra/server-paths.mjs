@@ -18,6 +18,7 @@ export const SERVER_PATHS = [
   '/api/session-guest',
   '/api/rooms/',
   '/api/health',
+  '/api/feedback', // relatos de bug e feedback, enviados ao Discord (spec 12)
   '/auth/',
 ];
 

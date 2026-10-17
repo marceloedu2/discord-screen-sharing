@@ -132,6 +132,25 @@ export class RoomConnection {
   #watching = new Set<number>();
   #drawing = new Set<number>();
 
+  /**
+   * O que se assistia quando o socket caiu (RN-AST-34). O servidor trata cada
+   * conexão como espectador novo — `watching` vazio — e reanuncia as
+   * transmissões com `stream-start`. Guardar aqui, por slot e por quem
+   * transmitia, deixa o `stream-start` do replay ser reconhecido como a mesma
+   * transmissão e reassistida sem a pessoa fazer nada, como Meet e Discord Web.
+   */
+  #resume = new Map<number, { userId: string; kind: 'screen' | 'camera' }>();
+
+  /**
+   * Esta sala já abriu pelo menos uma vez? (RN-AST-36)
+   *
+   * `opened` é por tentativa; uma tentativa de reconexão que falha porque a
+   * rede ainda está fora também fecha sem nunca abrir, e é indistinguível de
+   * um token recusado pela API do WebSocket. Só quem nunca conectou pode
+   * concluir que o token foi recusado.
+   */
+  #everOpened = false;
+
   /** Volume geral (0–1) e por pessoa (0–2). O que sai é o produto (RF-AUD-1). */
   #volume = 1;
   #volumePerPerson = new Map<string, number>();
@@ -174,6 +193,11 @@ export class RoomConnection {
     this.#timer = null;
     this.#ws?.close();
     this.#ws = null;
+    // Slots são da sala: os da anterior não significam nada nesta, e um
+    // decodificador vivo de lá desenharia a tela errada no mesmo número.
+    this.#reset();
+    this.#everOpened = false;
+    this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
 
     this.#wsUrl = wsUrl;
     this.#tokens = tokens;
@@ -198,6 +222,7 @@ export class RoomConnection {
 
     ws.addEventListener('open', () => {
       opened = true;
+      this.#everOpened = true;
       this.#sampler ??= setInterval(() => this.#sample(), 1000);
       this.#delay = 1000;
       this.#publish({ phase: 'open' });
@@ -236,14 +261,38 @@ export class RoomConnection {
         return;
       }
 
-      if (!opened) {
+      // Nunca abriu, e a rede está de pé: o token foi recusado (RF-SES-6).
+      // Reconectar com ele repetiria o 401 para sempre. Já abriu antes, ou o
+      // navegador está offline, é só a rede — segue tentando (RN-AST-36).
+      if (!opened && !this.#everOpened && navigator.onLine !== false) {
         this.#tokens = null;
         this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
         this.#handlers.onRejected?.();
         return;
       }
 
-      this.#publish({ phase: 'down', participants: [], streams: [] });
+      // Só a queda de uma conexão que estava aberta guarda o que se assistia.
+      // Uma tentativa que falha com a rede ainda fora não tem o que guardar, e
+      // apagaria o que a queda anterior deixou (RN-AST-34).
+      if (opened) {
+        this.#resume.clear();
+        for (const slot of this.#watching) {
+          const info = this.#available.get(slot);
+          if (info) this.#resume.set(slot, { userId: info.userId, kind: info.kind });
+        }
+        // Sem socket não chega quadro, e o servidor vai nos tratar como
+        // espectador novo: derruba os decodificadores.
+        this.#dropStreams();
+      }
+      this.#publish({
+        phase: 'down',
+        participants: [],
+        streams: [],
+        watching: [],
+        drawing: [],
+        withSound: [],
+        quality: {},
+      });
       // Backoff exponencial: 1 s, dobrando, teto de 15 s (RF-AST-10).
       this.#timer = setTimeout(() => this.#open(), this.#delay);
       this.#delay = Math.min(this.#delay * 2, 15_000);
@@ -268,6 +317,11 @@ export class RoomConnection {
           if (!alive.has(slot)) this.#closeStream(slot);
         }
         for (const slot of [...this.#watching]) if (!alive.has(slot)) this.#watching.delete(slot);
+        // Quem parou enquanto estávamos fora não volta: nada a retomar.
+        for (const [slot, was] of [...this.#resume]) {
+          const now = (msg.streams ?? []).find((s) => s.slot === slot);
+          if (!now || now.userId !== was.userId || now.kind !== was.kind) this.#resume.delete(slot);
+        }
 
         this.#publish({
           room: msg.room,
@@ -282,11 +336,29 @@ export class RoomConnection {
       case 'stream-start':
         // Só anuncia; ninguém assiste até pedir. Transmissão nova zera todo
         // mundo (RN-AST-6).
+        // O `state` que vem antes já registrou o que estava no ar; uma
+        // transmissão de verdade nunca aparece nele antes do próprio
+        // `stream-start`. Slot conhecido do mesmo transmissor = replay de
+        // entrada (ou reconfiguração), não início (RN-AST-32).
+        const known = this.#available.get(msg.slot);
+        const announced = known?.userId === msg.userId;
+
         this.#available.set(msg.slot, { userId: msg.userId, config: null, kind: msg.kind });
         this.#watching.delete(msg.slot);
         this.#closeStream(msg.slot);
         this.#publishSets();
-        this.#handlers.onStreamStart?.(msg.slot, msg.userId, msg.kind);
+
+        // Replay de entrada após reconectar: é a mesma transmissão que já se
+        // assistia. Reassiste e não avisa — ninguém "começou" nada (RN-AST-34,
+        // RN-AST-32). Consome a entrada, então um início de verdade depois
+        // disso segue o caminho normal.
+        if (this.#resume.get(msg.slot)?.userId === msg.userId && this.#resume.get(msg.slot)?.kind === msg.kind) {
+          this.#resume.delete(msg.slot);
+          this.watch(msg.slot);
+          break;
+        }
+        this.#resume.delete(msg.slot);
+        if (!announced) this.#handlers.onStreamStart?.(msg.slot, msg.userId, msg.kind);
         break;
 
       case 'config': {
@@ -356,7 +428,6 @@ export class RoomConnection {
    * ver zero sempre.
    */
   #sample(): void {
-    const target = 30;
     const quality: RoomSnapshot['quality'] = {};
 
     for (const slot of this.#watching) {
@@ -367,12 +438,13 @@ export class RoomConnection {
       const fps = stream.player.takeFrameCount();
       const dropping = Date.now() - (this.#drops.get(slot) ?? 0) < 3000;
 
-      quality[slot] =
-        dropping || lag > 800 || fps < target * 0.5
-          ? 'bad'
-          : lag > 300 || fps < target * 0.8
-            ? 'unstable'
-            : 'good';
+      // Atraso e descarte, não fps (RN-AST-37). Captura de tela só emite quadro
+      // quando algo muda: um documento parado entrega 1 ou 2 por segundo e está
+      // perfeito, e o preset Leve é 15 por desenho. Comparar com uma meta fixa
+      // de 30 marcava essas transmissões como ruins sem defeito nenhum — Meet e
+      // Discord julgam por atraso e perda pelo mesmo motivo. Decodificador
+      // lento aparece como atraso crescente; rede lenta, como descarte.
+      quality[slot] = dropping || lag > 800 ? 'bad' : lag > 300 ? 'unstable' : 'good';
       this.#lastFps.set(slot, fps);
     }
 
@@ -461,6 +533,23 @@ export class RoomConnection {
     }
   }
 
+  /** Derruba todos os decodificadores e esquece o que era assistido. */
+  #dropStreams(): void {
+    for (const slot of [...this.#streams.keys()]) this.#closeStream(slot);
+    this.#available.clear();
+    this.#watching.clear();
+    this.#drawing.clear();
+  }
+
+  /** Esquece tudo que pertence a uma sala; preferências de quem assiste ficam. */
+  #reset(): void {
+    this.#dropStreams();
+    this.#resume.clear();
+    this.#drops.clear();
+    this.#lastFps.clear();
+    this.#lastFrameAt.clear();
+  }
+
   #closeStream(slot: number): void {
     const stream = this.#streams.get(slot);
     if (!stream) return;
@@ -469,8 +558,8 @@ export class RoomConnection {
     stream.canvas.remove();
     this.#streams.delete(slot);
     this.#drawing.delete(slot);
-    // Slot é reciclado entre transmissores (RN-PRO-*, no máximo 4 ao mesmo
-    // tempo): sem isto, um carimbo velho da transmissão anterior podia
+    // Slot é reciclado entre transmissores (RN-PRO-*, o servidor reaproveita
+    // o número): sem isto, um carimbo velho da transmissão anterior podia
     // convencer o vigia de travamento de que a nova já desenhou algo.
     this.#lastFrameAt.delete(slot);
   }
@@ -647,9 +736,7 @@ export class RoomConnection {
     this.#tokens = null;
     if (this.#sampler) clearInterval(this.#sampler);
     this.#sampler = null;
-    for (const slot of [...this.#streams.keys()]) this.#closeStream(slot);
-    this.#available.clear();
-    this.#watching.clear();
+    this.#reset();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.#ws?.close();

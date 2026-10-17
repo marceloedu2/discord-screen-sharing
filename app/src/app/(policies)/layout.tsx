@@ -28,7 +28,7 @@ export default function LayoutPoliticas({ children }: { children: ReactNode }) {
   return (
     <div className="flex-1 overflow-y-auto px-5 pt-8 pb-16">
       {/* Medida de linha: acima de ~75 caracteres o olho perde a linha seguinte
-          ao goBack da direita para a esquerda. */}
+          ao voltar da direita para a esquerda. */}
       <main
         className={`mx-auto max-w-[720px] rounded-xl border border-line bg-painel px-6 py-9 leading-[1.7] text-suave sm:px-10 ${TIPOGRAFIA}`}
       >

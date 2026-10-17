@@ -49,7 +49,7 @@ export default function Privacidade() {
 
       <h3>2.1 Dados recebidos do Discord</h3>
       <p>
-        Ao enterRoom, você autoriza o acesso apenas ao escopo <code>identify</code>. Com ele recebemos:
+        Ao entrar, você autoriza o acesso apenas ao escopo <code>identify</code>. Com ele recebemos:
       </p>
       <ul>
         <li>
@@ -90,6 +90,14 @@ export default function Privacidade() {
           <strong>Senha da sala:</strong> guardada apenas em forma embaralhada (<em>hash</em> com
           sal, algoritmo scrypt). A senha original não fica registrada em lugar nenhum e não pode
           ser recuperada.
+        </li>
+        <li>
+          <strong>Relatos de bug e feedback:</strong> só são enviados se você usar o botão de
+          feedback. Vão o que você escreve, as imagens que anexar e, para ajudar a reproduzir o
+          problema, o seu nome exibido e identificador, a tela e a sala em que estava, o tamanho da
+          janela e o navegador. A mensagem é publicada num canal privado do Discord da equipe, onde
+          fica até a equipe apagá-la; o servidor não guarda cópia. Não anexe imagens com dados que
+          você não queira mostrar a essas pessoas.
         </li>
       </ul>
 
@@ -172,7 +180,7 @@ export default function Privacidade() {
           <code>displayName</code> — o apelido que você escolheu.
         </li>
         <li>
-          <code>sala:&lt;id&gt;</code> — permissão de goBack a uma sala em que você já entrou, para
+          <code>sala:&lt;id&gt;</code> — permissão de voltar a uma sala em que você já entrou, para
           que atualizar a página não exija digitar a senha de novo.
         </li>
         <li>
@@ -185,8 +193,9 @@ export default function Privacidade() {
       <p>Não vendemos, alugamos nem cedemos dados a ninguém. Não há publicidade nem analytics.</p>
       <ul>
         <li>
-          <strong>Discord:</strong> autentica você e fornece a foto de perfil. O uso dos dados pelo
-          Discord segue a política de privacidade dele.
+          <strong>Discord:</strong> autentica você, fornece a foto de perfil e recebe os relatos de
+          bug e feedback que você enviar. O uso dos dados pelo Discord segue a política de
+          privacidade dele.
         </li>
         <li>
           <strong>Cloudflare:</strong> transporta o tráfego entre você e o servidor, na condição de

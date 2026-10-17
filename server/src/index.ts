@@ -12,12 +12,13 @@ import { createServer } from 'node:http';
 
 import { createRouter } from './http.ts';
 import { routes } from './api.ts';
+import { rawRoutes } from './feedback.ts';
 import { mountRelay } from './relay.ts';
 import { DISCORD_CLIENT_ID, PORT, PUBLIC_ORIGIN } from './config.ts';
 
 // O roteador é montado uma vez, não por pedido: a tabela é fixa e remontá-la
 // a cada requisição só gera lixo.
-const handle = createRouter(routes);
+const handle = createRouter(routes, rawRoutes);
 
 const server = createServer((req, res) => {
   void handle(req, res);

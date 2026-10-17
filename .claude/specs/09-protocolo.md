@@ -172,3 +172,10 @@ de tipo é a única coisa que os distingue.
 | `DISCORD_CLIENT_SECRET` | não | nunca sai do processo do servidor |
 | `DISCORD_BOT_TOKEN` | não | só para confirmar presença na call (`RF-SES-2`) |
 | `NODE_ENV` | sim | `production` desliga `/api/session-dev` |
+
+`RN-PRO-21` · novo · P0 — **Erro de socket nunca derruba o processo.** O `ws`
+emite `error` para quadro acima de `maxPayload` (código 1009), UTF-8 inválido
+e violação de protocolo; `error` sem ouvinte é exceção não tratada do Node, e
+levaria junto todas as salas, que vivem em memória. O relay registra um ouvinte
+em toda conexão, antes de qualquer despacho por papel. Coberto por
+`e2e/protocolo.spec.ts` (quadro de 5 MB de transmissor e de espectador).

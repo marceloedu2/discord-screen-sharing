@@ -724,7 +724,7 @@ export function createBroadcaster({
 
       const timeout = setTimeout(() => {
         socket.close();
-        reject(new Error('Não foi possível falar com o guild (timeout).'));
+        reject(new Error('Não foi possível falar com o servidor (timeout).'));
       }, 10_000);
 
       socket.addEventListener('open', () => {
@@ -752,12 +752,12 @@ export function createBroadcaster({
 
       socket.addEventListener('error', () => {
         clearTimeout(timeout);
-        reject(new Error('Falha ao conectar no guild.'));
+        reject(new Error('Falha ao conectar no servidor.'));
       });
 
       socket.addEventListener('close', () => {
         clearTimeout(timeout);
-        if (running) stop('Conexão com o guild caiu.');
+        if (running) stop('Conexão com o servidor caiu.');
       });
     });
   }

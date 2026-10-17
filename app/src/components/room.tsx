@@ -14,6 +14,7 @@ import { Grid } from "./grid";
 import { Lobby, PasswordModal, ChangePasswordModal } from "./lobby";
 import { ControlBar, RoundButton, Group, Icon } from "./controls";
 import { Details } from "./details";
+import { FeedbackModal } from "./feedback-modal";
 import { ActionItem, CheckItem, Menu, Separator } from "./menu";
 import { TileMenu } from "./tile-menu";
 import { Modal } from "./modal";
@@ -126,6 +127,7 @@ export function Room({ guild }: { guild?: string } = {}) {
   const [askingPassword, setAskingPassword] = useState<RoomSummary | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [notice, setNotice] = useState<{
     text: string;
     error: boolean;
@@ -993,7 +995,7 @@ export function Room({ guild }: { guild?: string } = {}) {
                 {DEFAULT_PRESET.summary.replace(" · ", " ").toUpperCase()}
               </span>
             ) : null}
-            <span className="rounded bg-perigo px-2 py-1 text-[11px] font-semibold tracking-wide text-white">
+            <span className="rounded bg-perigo-solido px-2 py-1 text-[11px] font-semibold tracking-wide text-white">
               AO VIVO
             </span>
           </>
@@ -1001,17 +1003,30 @@ export function Room({ guild }: { guild?: string } = {}) {
 
         <button
           type="button"
+          onClick={() => setFeedbackOpen(true)}
+          aria-label="Enviar feedback"
+          title="Enviar feedback ou relatar um bug"
+          className="grid size-8 shrink-0 place-items-center rounded-full text-suave hover:bg-tile hover:text-texto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto [&_svg]:size-[18px] [&_svg]:fill-none [&_svg]:stroke-current [&_svg]:[stroke-width:1.8] [&_svg]:[stroke-linecap:round] [&_svg]:[stroke-linejoin:round]"
+        >
+          <Icon.Feedback />
+        </button>
+
+        <button
+          type="button"
           onClick={() => setProfileOpen(true)}
-          aria-label={`Seu perfil: ${eu.name}`}
+          // Sem aria-label: o nome vem do conteúdo, e o rótulo visível ("C9
+          // Convidado 9325", com as iniciais do avatar) tem que estar contido
+          // no nome acessível (WCAG 2.5.3) — qualquer aria-label divergia disso.
           className="flex items-center gap-2 rounded-full px-2 py-1 hover:bg-tile focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto"
         >
           <Avatar id={eu.id} name={eu.name} avatar={eu.avatar} className="w-7! text-[11px]!" />
           <span className="max-w-[20ch] truncate text-[13px] text-suave">{eu.name}</span>
+          <span className="sr-only"> · Seu perfil</span>
         </button>
       </header>
 
       {/* A faixa de baixo é reservada para a barra flutuante: sem ela, os
-          controles cobrem o rodapé dos tiles e o name de quem está neles. */}
+          controles cobrem o rodapé dos tiles e o nome de quem está neles. */}
       <main className={`relative min-h-0 flex-1 ${inRoom ? "pb-[76px]" : ""}`}>
         {inRoom ? (
           room.mode === "focus" && room.streams.length > 0 ? (
@@ -1130,6 +1145,16 @@ export function Room({ guild }: { guild?: string } = {}) {
           />
         ) : null}
 
+        {feedbackOpen ? (
+          <FeedbackModal
+            url={api("/api/feedback")}
+            identity={session?.identity ?? null}
+            name={eu.name}
+            where={feedbackWhere(inRoom)}
+            onClose={() => setFeedbackOpen(false)}
+          />
+        ) : null}
+
         {profileOpen ? (
           <Profile
             user={eu}
@@ -1235,7 +1260,7 @@ export function Room({ guild }: { guild?: string } = {}) {
                         />
                       ) : null}
                       <ActionItem
-                        label="Details da conexão"
+                        label="Detalhes da conexão"
                         onClick={() => {
                           setMenuOpen(false);
                           setDetails(true);
@@ -1246,6 +1271,13 @@ export function Room({ guild }: { guild?: string } = {}) {
                         onClick={() => {
                           setMenuOpen(false);
                           setProfileOpen(true);
+                        }}
+                      />
+                      <ActionItem
+                        label="Enviar feedback"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setFeedbackOpen(true);
                         }}
                       />
                     </Menu>
@@ -1301,7 +1333,7 @@ export function Room({ guild }: { guild?: string } = {}) {
               <RoundButton
                 // O rótulo muda com o estado: anunciar sempre a mesma coisa
                 // mentiria para quem usa leitor de tela (RN-AST-15).
-                label={fullscreen ? "Sair da tela cheia" : "Screen cheia"}
+                label={fullscreen ? "Sair da tela cheia" : "Tela cheia"}
                 onClick={toggleFullscreen}
               >
                 {fullscreen ? <Icon.ExitFullscreen /> : <Icon.Fullscreen />}
@@ -1342,6 +1374,16 @@ export function Room({ guild }: { guild?: string } = {}) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * Onde a pessoa estava, para o relato de bug: tela, caminho e sala.
+ *
+ * Nunca o fragmento da URL — é nele que o crachá volta do login (`#identity=`).
+ */
+function feedbackWhere(inRoom: boolean): string {
+  const room = new URLSearchParams(location.search).get("room");
+  return `${inRoom ? "sala" : "lobby"} · ${location.pathname}${room ? `?room=${room}` : ""}`;
 }
 
 function Panel({ title, text }: { title: string; text: string }) {

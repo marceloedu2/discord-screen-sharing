@@ -424,8 +424,12 @@ export function rename(room: Room, ws: WebSocket, raw: unknown): void {
   if (!name) return;
 
   viewer.info = { ...viewer.info, name };
-  const broadcast = room.broadcasters.get(viewer.info.id);
-  if (broadcast) broadcast.info = { ...broadcast.info, name };
+  // A chave é `uid:kind` desde RF-CAM-1; procurar só por `uid` não achava
+  // ninguém, e o nome do transmissor ficava o antigo.
+  for (const kind of ["screen", "camera"] as const) {
+    const broadcast = room.broadcasters.get(broadcastKey(viewer.info.id, kind));
+    if (broadcast) broadcast.info = { ...broadcast.info, name };
+  }
   broadcastState(room);
 }
 
@@ -692,7 +696,12 @@ export function attachViewer(room: Room, ws: WebSocket, info: Person): void {
   // Anuncia o que está no ar, sem começar a mandar quadros: assistir é opt-in.
   for (const b of room.broadcasters.values()) {
     if (!b.streaming) continue;
-    sendJson(ws, { type: "stream-start", slot: b.slot, userId: b.info.id });
+    sendJson(ws, {
+      type: "stream-start",
+      slot: b.slot,
+      userId: b.info.id,
+      kind: b.kind,
+    });
   }
 
   broadcastState(room);

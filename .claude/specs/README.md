@@ -22,6 +22,7 @@ construir** — incluindo o que muda e o que passa a existir.
 | [09-protocolo.md](09-protocolo.md) | Contrato HTTP e WebSocket (herdado, não muda) |
 | [10-paridade-discord.md](10-paridade-discord.md) | **O que o Discord tem hoje e nós não** |
 | [11-roadmap.md](11-roadmap.md) | Ordem de implementação por fases |
+| [12-feedback.md](12-feedback.md) | Botão de feedback e relato de bugs, enviado ao Discord |
 
 ## Onde as coisas moram
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * O aviso passageiro, no canto superior direito, abaixo do cabeçalho.
@@ -33,13 +33,22 @@ export function Toast({
   action?: { label: string; onClick: () => void };
   onDismiss: () => void;
 }) {
+  // O callback vem como arrow nova a cada render de quem chama, e a sala
+  // re-renderiza todo segundo (a amostragem de qualidade publica estado). Com
+  // `onDismiss` nas dependências, o prazo de 6 s era reiniciado antes de vencer
+  // e nenhum aviso saía da tela enquanto alguém assistia — erros inclusive.
+  const dismiss = useRef(onDismiss);
   useEffect(() => {
-    const t = setTimeout(onDismiss, DURACAO_MS);
+    dismiss.current = onDismiss;
+  });
+
+  useEffect(() => {
+    const t = setTimeout(() => dismiss.current(), DURACAO_MS);
     return () => clearTimeout(t);
     // A mensagem entra na dependência de propósito: um toast novo enquanto o
     // anterior ainda está na tela reinicia a contagem, em vez de herdar o resto
     // do tempo do outro.
-  }, [message, onDismiss]);
+  }, [message]);
 
   return (
     <div
@@ -58,6 +67,9 @@ export function Toast({
       }
     >
       {message}
+      {/* Espaço de texto de verdade: a margem do botão é só visual, e o leitor
+          de tela lia "…ligou a câmeraAssistir" como uma palavra. */}
+      {action ? " " : null}
       {action ? (
         <button
           type="button"

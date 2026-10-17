@@ -41,7 +41,7 @@ export function Details({
     <div className="absolute right-4 bottom-[76px] z-20 w-[min(360px,calc(100vw-32px))] rounded-lg border border-linha bg-[#111214] p-4 shadow-[0_16px_48px_rgba(0,0,0,0.6)]">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-[11px] font-semibold tracking-[.07em] text-suave uppercase">
-          Details
+          Detalhes
         </h2>
         <button
           type="button"
