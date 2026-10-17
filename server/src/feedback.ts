@@ -15,6 +15,7 @@ import type { IncomingMessage } from 'node:http';
 import { fail, json } from './http.ts';
 import type { Handler } from './http.ts';
 import { verify } from './tokens.ts';
+import { getRoom } from './rooms.ts';
 import {
   DISCORD_API_BASE,
   DISCORD_BOT_TOKEN,
@@ -32,7 +33,7 @@ type Kind = (typeof KINDS)[number];
 
 const LIMITS = {
   title: { min: 3, max: 100 },
-  description: { min: 10, max: 1500 },
+  description: { min: 1, max: 1500 },
   steps: { max: 1000 },
   contact: { max: 100 },
   where: { max: 200 },
@@ -192,20 +193,52 @@ interface Report {
   viewport: string;
   userAgent: string;
   sender: { name: string; id: string } | null;
+  /** A conta do Discord, só para quem entrou por ele: o id vem do crachá verificado. */
+  discord: { id: string; name: string; avatar: string | null } | null;
+  /** A sala em que a pessoa estava, resolvida aqui pelo id — o nome não vem do cliente. */
+  room: { name: string; call: boolean } | null;
   images: Attachment[];
 }
+
+const SNOWFLAKE = /^[0-9]{15,21}$/;
+const AVATAR_HASH = /^(a_)?[0-9a-f]{32}$/;
 
 function messageOf(r: Report) {
   const bug = r.kind === 'bug';
   const field = (name: string, value: string, inline = false) =>
     value ? [{ name, value: defang(value).slice(0, 1024), inline }] : [];
 
+  // O campo do Discord é montado por nós, a partir de um id que passou por
+  // SNOWFLAKE e pelo crachá assinado — nunca por `field()`, que desfaz `<@`.
+  // A menção aparece como o nome da pessoa para quem divide servidor com ela, e
+  // não pinga ninguém: `allowed_mentions` vai vazio.
+  const discordField = r.discord
+    ? [{ name: 'Discord', value: `<@${r.discord.id}>\n[Abrir perfil](https://discord.com/users/${r.discord.id})`, inline: true }]
+    : [{ name: 'Discord', value: 'Convidado, sem conta do Discord', inline: true }];
+
+  const avatar =
+    r.discord?.avatar && AVATAR_HASH.test(r.discord.avatar)
+      ? `https://cdn.discordapp.com/avatars/${r.discord.id}/${r.discord.avatar}.png?size=64`
+      : null;
+
   const embed = {
     title: defang(`${bug ? '🐞 Bug' : '💬 Feedback'}: ${r.title}`).slice(0, 256),
     description: defang(r.description).slice(0, 4000),
     color: bug ? 0xf23f43 : 0x5865f2,
+    // Quem enviou, no alto do cartão: com a foto e o link quando é conta do Discord.
+    ...(r.sender
+      ? {
+          author: {
+            name: defang(r.sender.name).slice(0, 256),
+            ...(r.discord ? { url: `https://discord.com/users/${r.discord.id}` } : {}),
+            ...(avatar ? { icon_url: avatar } : {}),
+          },
+        }
+      : {}),
     fields: [
       ...(bug ? field('Passos para reproduzir', r.steps) : []),
+      ...field('Sala', r.room ? `${r.room.name}${r.room.call ? ' (call do Discord)' : ''}` : 'Fora de uma sala (lobby)', true),
+      ...discordField,
       ...field('Contato', r.contact, true),
       ...field('Enviado por', r.sender ? `${r.sender.name} (\`${r.sender.id}\`)` : 'Convidado sem identidade', true),
       ...field('Onde', r.where, true),
@@ -319,7 +352,7 @@ const submit: Handler = async ({ req, res }) => {
     return fail(res, 400, `O título precisa ter ao menos ${LIMITS.title.min} caracteres.`, { code: 'title' });
   }
   if (description.length < LIMITS.description.min) {
-    return fail(res, 400, `A descrição precisa ter ao menos ${LIMITS.description.min} caracteres.`, { code: 'description' });
+    return fail(res, 400, 'Escreva a descrição.', { code: 'description' });
   }
 
   // Imagens: quantidade, tamanho e o formato lido dos bytes.
@@ -350,6 +383,17 @@ const submit: Handler = async ({ req, res }) => {
   // depois de o crachá ser emitido). É só rótulo — quem confia no id é o crachá.
   const shownName = clean(form.get('name'), 32);
   const sender = claims?.scope === 'identity' ? { name: shownName || claims.name, id: claims.uid } : null;
+  // Ids de convidado e de teste não são snowflakes: só conta do Discord de verdade vira link.
+  const discord =
+    claims?.scope === 'identity' && SNOWFLAKE.test(claims.uid)
+      ? { id: claims.uid, name: shownName || claims.name, avatar: claims.av ?? null }
+      : null;
+
+  // A sala vem pelo id e o nome é lido do registro do servidor: o que o cliente
+  // diz sobre o nome de uma sala não é confiável, e id desconhecido é ignorado.
+  const roomId = clean(form.get('room'), 40);
+  const found = roomId ? getRoom(roomId) : null;
+  const room = found ? { name: found.name, call: found.isCall } : null;
 
   // O Caddy sobrescreve o X-Forwarded-For de quem chega de fora; atrás dele o
   // endereço do socket seria sempre o do próprio proxy.
@@ -374,6 +418,8 @@ const submit: Handler = async ({ req, res }) => {
     viewport: clean(form.get('viewport'), LIMITS.viewport.max),
     userAgent: clean(req.headers['user-agent'], 200),
     sender,
+    discord,
+    room,
     images,
   };
 

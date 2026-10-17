@@ -127,6 +127,8 @@ test.describe('modal de feedback', () => {
     expect(campo('Onde')).toMatch(/^sala · \/\?room=/);
     expect(campo('Tela')).toMatch(/^\d+×\d+$/);
     expect(campo('Imagens')).toBe('2');
+    expect(campo('Sala')).toBe(sala);
+    expect(campo('Discord')).toBe('Convidado, sem conta do Discord');
     expect(msg.files.map((f: any) => [f.name, f.type])).toEqual([['imagem-1.png', 'image/png'], ['imagem-2.webp', 'image/webp']]);
 
     // Fechar volta para onde estava.
@@ -151,6 +153,7 @@ test.describe('modal de feedback', () => {
     expect(msg.payload.embeds[0].title).toBe('💬 Feedback: Fixar duas telas');
     expect(msg.payload.embeds[0].fields.map((f: any) => f.name)).not.toContain('Passos para reproduzir');
     expect(msg.payload.embeds[0].fields.find((f: any) => f.name === 'Onde').value).toMatch(/^lobby · \//);
+    expect(msg.payload.embeds[0].fields.find((f: any) => f.name === 'Sala').value).toBe('Fora de uma sala (lobby)');
   });
 
   test('validação: campos obrigatórios avisam, focam o primeiro e nada é enviado', async ({ spawn }) => {
@@ -163,7 +166,7 @@ test.describe('modal de feedback', () => {
     await expect(dialogo(ana).getByLabel('Resumo')).toHaveAttribute('aria-invalid', 'true');
 
     await dialogo(ana).getByLabel('Resumo').fill('Algo quebrou');
-    await dialogo(ana).getByLabel('O que aconteceu?').fill('curto');
+    await dialogo(ana).getByLabel('O que aconteceu?').fill('     ');
     await enviar(ana);
     await expect(dialogo(ana).getByRole('alert')).toContainText('descrição');
     await expect(dialogo(ana).getByLabel('O que aconteceu?')).toBeFocused();
@@ -438,5 +441,58 @@ test.describe('modal de feedback', () => {
     await expect(dialogo(ana).getByRole('alert')).toContainText('Confira sua conexão');
     await expect(dialogo(ana).getByLabel('Resumo')).toHaveValue('Resumo preservado');
     await expect(dialogo(ana).getByRole('button', { name: 'Enviar', exact: true })).toBeEnabled();
+  });
+
+  test('descrição curta é aceita: não há mínimo de caracteres, e dá para digitar e enviar uma palavra', async ({ spawn }) => {
+    const ana = await spawn('Ana');
+    await comEndereco(ana);
+    await ana.page.goto('/');
+    await abrir(ana);
+    await dialogo(ana).getByLabel('Resumo').fill('Bug');
+    // Digitação de verdade, tecla a tecla, e o campo nunca trava nem avisa no meio.
+    await dialogo(ana).getByLabel('O que aconteceu?').click();
+    await ana.page.keyboard.type('trava', { delay: 30 });
+    await expect(dialogo(ana).getByLabel('O que aconteceu?')).toHaveValue('trava');
+    await expect(dialogo(ana).getByRole('alert')).toHaveCount(0);
+    await enviar(ana);
+    await expect(ana.page.getByRole('dialog', { name: 'Relato enviado' })).toBeVisible();
+    expect((await gravados())[0].payload.embeds[0].description).toBe('trava');
+  });
+
+  test('o foco não é roubado do campo enquanto a tela re-renderiza (lobby a cada 4 s, sala a cada 1 s)', async ({ spawn }) => {
+    test.setTimeout(60_000);
+    const ana = await spawn('Ana');
+    await comEndereco(ana);
+
+    const digitarDevagar = async (pessoa: User) => {
+      const campo = dialogo(pessoa).getByLabel('O que aconteceu?');
+      await campo.click();
+      await pessoa.page.keyboard.type('abc', { delay: 20 });
+      // Atravessa pelo menos um ciclo de re-render da página por trás.
+      await pessoa.page.waitForTimeout(4500);
+      await expect(campo, 'o campo perdeu o foco no meio da digitação').toBeFocused();
+      await pessoa.page.keyboard.type('def', { delay: 20 });
+      await expect(campo).toHaveValue('abcdef');
+    };
+
+    // Lobby: a lista recarrega a cada 4 s.
+    await ana.page.goto('/');
+    await abrir(ana);
+    await digitarDevagar(ana);
+    await ana.page.keyboard.press('Escape');
+
+    // Os outros modais do lobby sofrem do mesmo defeito.
+    await ana.page.getByRole('button', { name: 'Criar sala', exact: true }).click();
+    const nome = ana.page.locator('#roomName');
+    await nome.click();
+    await ana.page.keyboard.type('sala', { delay: 20 });
+    await ana.page.waitForTimeout(4500);
+    await expect(nome, 'o modal de criar sala também perdeu o foco').toBeFocused();
+    await ana.page.keyboard.press('Escape');
+
+    // Sala: a qualidade é amostrada a cada segundo.
+    await createRoom(ana, `fb-foco-${Date.now()}`);
+    await abrir(ana);
+    await digitarDevagar(ana);
   });
 });

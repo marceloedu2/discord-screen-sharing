@@ -36,6 +36,7 @@ export function FeedbackModal({
   url,
   identity,
   name,
+  roomId,
   where,
   onClose,
 }: {
@@ -44,6 +45,8 @@ export function FeedbackModal({
   identity: string | null;
   /** O nome que a pessoa vê aqui (o apelido), e não o que o crachá guardou ao ser emitido. */
   name: string;
+  /** A sala atual, quando há: o servidor resolve o nome dela e o põe no relato. */
+  roomId: string | null;
   /** Onde a pessoa estava: caminho e sala, nunca o fragmento com o crachá. */
   where: string;
   onClose: () => void;
@@ -120,6 +123,7 @@ export function FeedbackModal({
         {
           identity,
           name,
+          room: roomId,
           where,
           viewport: `${window.innerWidth}×${window.innerHeight}`,
           website,

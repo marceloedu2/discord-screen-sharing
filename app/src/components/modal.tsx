@@ -29,6 +29,17 @@ export function Modal({
 }) {
   const card = useRef<HTMLDivElement>(null);
 
+  // `onClose` chega como arrow nova a cada render de quem chama, e a página por
+  // trás re-renderiza sozinha (a lista de salas a cada 4 s, a sala a cada 1 s).
+  // Com `onClose` nas dependências do efeito abaixo, cada re-render rodava a
+  // limpeza — que devolve o foco a quem abriu o modal — e depois puxava o foco de
+  // volta para o cartão: quem digitava num campo era arrancado dele no meio da
+  // frase. A ref deixa o efeito rodar uma vez só, ao abrir.
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
+
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     card.current?.focus();
@@ -36,7 +47,7 @@ export function Modal({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        close.current();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -45,7 +56,7 @@ export function Modal({
       document.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div
@@ -57,7 +68,7 @@ export function Modal({
       // O fundo fecha; o cartão não. Sem o alvo exato, um clique que começa
       // dentro e termina fora fecharia o modal no meio de uma seleção.
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) close.current();
       }}
     >
       <div

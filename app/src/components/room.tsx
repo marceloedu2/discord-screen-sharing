@@ -1150,6 +1150,7 @@ export function Room({ guild }: { guild?: string } = {}) {
             url={api("/api/feedback")}
             identity={session?.identity ?? null}
             name={eu.name}
+            roomId={inRoom ? (tokens?.roomId ?? null) : null}
             where={feedbackWhere(inRoom)}
             onClose={() => setFeedbackOpen(false)}
           />

@@ -14,7 +14,7 @@ o modal. Fecha com `Esc`, clique fora e **Cancelar**, e o foco volta ao botão.
 |---|---|
 | Tipo | **Relatar um bug** (padrão) ou **Dar um feedback** |
 | Resumo | obrigatório, 3–100 caracteres |
-| Descrição | obrigatória, 10–1500 caracteres, com contador |
+| Descrição | obrigatória (não pode ficar em branco), **sem mínimo de caracteres**, até 1500, com contador |
 | Como reproduzir | só em bug, opcional, até 1000 |
 | Contato | opcional, até 100 (usuário do Discord ou e-mail) |
 | Imagens | opcional, até **5**, **8 MB** cada, PNG · JPG · GIF · WebP |
@@ -71,6 +71,20 @@ de foco: preenchido, a resposta é 200 e **nada** é enviado.
 `RN-FBK-7` · novo · P1 — Falhas do Discord: 401/403/404 (token, permissão ou
 canal errados) viram **502 genérico** — o detalhe fica no log do servidor, nunca
 na resposta; 429 vira 503 com `retryAfter`; Discord fora do ar, 502.
+
+`RF-FBK-6` · novo · P1 — **O cartão diz de onde veio e de quem é.** Campos
+**Sala** (o nome, lido do registro do servidor pelo id que o cliente manda —
+nunca o nome vindo do cliente; "(call do Discord)" nas salas de call; "Fora de
+uma sala (lobby)" sem sala ou com id desconhecido) e **Discord**.
+
+`RN-FBK-8` · novo · P1 — **Discord só para conta de verdade.** Quem entrou pelo
+Discord (crachá assinado, `uid` numérico de 15 a 21 dígitos) ganha: menção
+`<@id>` (aparece como o nome, e **não pinga** — `allowed_mentions` vazio), link
+do perfil, e o autor do cartão com nome, link e foto (hash validado). Convidado,
+id de teste, crachá forjado, expirado ou de outro tipo: "Convidado, sem conta do
+Discord", sem link nem foto. O nome mostrado é o apelido atual (o crachá guarda o
+de quando foi emitido), mas o **id é sempre o do crachá** — o apelido é só rótulo
+e passa pelo mesmo desarme de menções.
 
 ## Testes
 

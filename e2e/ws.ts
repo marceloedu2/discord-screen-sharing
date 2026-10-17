@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import WebSocket from 'ws';
 
 /** Helpers de protocolo, sem navegador: sessão, sala, sockets que guardam tudo que chega. */
@@ -81,3 +82,10 @@ export async function dispose() {
 }
 
 export const healthy = async () => (await fetch(`${BASE}/api/health`).catch(() => null))?.ok === true;
+
+/** O mesmo formato de server/src/tokens.ts, com o segredo fixo da pilha de teste. */
+export const TEST_SECRET = 'segredo-so-de-teste-e2e';
+export function assinar(claims: Record<string, unknown>, secret = TEST_SECRET): string {
+  const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  return `${body}.${crypto.createHmac('sha256', secret).update(body).digest('base64url')}`;
+}

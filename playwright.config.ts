@@ -45,6 +45,8 @@ export default defineConfig({
       // postaria no canal de verdade). Variável já definida vence o `.env`.
       env: {
         PUBLIC_ORIGIN: 'http://localhost:3000',
+        // Fixo para os testes assinarem crachás (ver `assinar` em e2e/ws.ts).
+        SESSION_SECRET: 'segredo-so-de-teste-e2e',
         DISCORD_CLIENT_ID: '',
         DISCORD_CLIENT_SECRET: '',
         DISCORD_GUILD_IDS: '',

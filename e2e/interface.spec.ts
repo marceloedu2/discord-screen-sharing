@@ -282,4 +282,28 @@ test.describe('texto e acessibilidade em todos os estados', () => {
       expect(await axe(cap), 'captura no ar').toEqual([]);
     }
   });
+
+  test('axe nos convites ("Assistir a tela de…") e nos tiles da própria pessoa ("Ver minha tela")', async ({ spawn }) => {
+    const ana = await spawn('Ana');
+    const bia = await spawn('Bia');
+    const sala = unique('axe-convite');
+    await createRoom(ana, sala);
+    await joinRoom(bia, sala);
+    await shareScreen(ana);
+    await shareCamera(ana);
+
+    // Convite para quem assiste: o nome acessível continua dizendo de quem é a tela.
+    await expect(invite(bia)).toHaveCount(2);
+    expect(await axe(bia), 'convites').toEqual([]);
+    // E para quem transmite, o tile próprio.
+    await expect(ana.page.getByRole('button', { name: 'Ver minha tela' })).toHaveCount(2);
+    expect(await axe(ana), 'tiles próprios').toEqual([]);
+
+    // Miniaturas (modo foco): sem texto visível, o nome só existe para o leitor de tela.
+    await bia.page.getByRole('button', { name: 'Mais opções' }).click();
+    await bia.page.getByRole('menuitemcheckbox', { name: 'Exibição em grade' }).click();
+    await bia.page.keyboard.press('Escape');
+    expect(await axe(bia), 'foco, com miniaturas').toEqual([]);
+    await expect(bia.page.getByRole('button', { name: /^Assistir a tela de/ }).first()).toBeVisible();
+  });
 });

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { BASE, guest, post, healthy } from './ws';
+import { BASE, guest, post, healthy, assinar } from './ws';
 
 /**
  * A rota /api/feedback contra um Discord falso (e2e/discord-mock.mjs): o que o
@@ -36,6 +36,7 @@ interface Envio {
   viewport?: string;
   website?: string;
   identity?: string;
+  room?: string;
   images?: { bytes: Buffer; name?: string; type?: string }[];
   ip?: string;
   rota?: string;
@@ -44,7 +45,7 @@ interface Envio {
 async function enviar(e: Envio = {}) {
   const form = new FormData();
   const campos = { kind: 'bug', title: 'O vídeo trava', description: 'Ao assistir a tela, o vídeo congela depois de um minuto.', ...e };
-  for (const k of ['kind', 'title', 'description', 'steps', 'contact', 'where', 'viewport', 'website', 'identity'] as const) {
+  for (const k of ['kind', 'title', 'description', 'steps', 'contact', 'where', 'viewport', 'website', 'identity', 'room'] as const) {
     if (campos[k] !== undefined) form.append(k, campos[k]!);
   }
   for (const [i, img] of (e.images ?? []).entries()) {
@@ -143,7 +144,7 @@ test.describe('POST /api/feedback', () => {
       ['sem tipo', { kind: 'outro' }, 400, 'kind'],
       ['título curto', { title: 'ab' }, 400, 'title'],
       ['título só de espaços', { title: '     ' }, 400, 'title'],
-      ['descrição curta', { description: 'curta' }, 400, 'description'],
+      ['descrição vazia (só espaços)', { description: '     ' }, 400, 'description'],
       ['seis imagens', { images: Array.from({ length: 6 }, () => ({ bytes: preenchido(PNG, 100) })) }, 400, 'images-count'],
       ['arquivo que não é imagem, com nome .png', { images: [{ bytes: Buffer.from('MZ\x90\x00 executavel disfarçado') , name: 'foto.png', type: 'image/png' }] }, 400, 'image-type'],
       ['html disfarçado de imagem', { images: [{ bytes: Buffer.from('<html><script>alert(1)</script>'), name: 'a.png' }] }, 400, 'image-type'],
@@ -294,5 +295,117 @@ test.describe('POST /api/feedback', () => {
     form.append('constructor', 'y');
     const r = await fetch(`${BASE}/api/feedback`, { method: 'POST', body: form, headers: { 'x-forwarded-for': novoEndereco() } });
     expect(r.status).toBeLessThan(500);
+  });
+
+  // ------------------------------------------------------ sala e conta do Discord
+
+  const ID_DISCORD = '123456789012345678';
+  const AVATAR = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const crachaDiscord = (extra: Record<string, unknown> = {}) =>
+    assinar({ instance: 'web', uid: ID_DISCORD, name: 'Ana do Discord', av: AVATAR, scope: 'identity', ...extra });
+  const primeiro = async () => (await gravados())[0]!.payload!.embeds[0];
+  const campoDe = (embed: any, nome: string) => embed.fields.find((f: any) => f.name === nome)?.value as string | undefined;
+
+  test('traz o nome da sala em que a pessoa estava, lido do servidor', async () => {
+    const dono = await guest('Dono');
+    const sala = await post('/api/rooms/create', { identity: dono, name: 'Sala dos Testes' });
+    await enviar({ room: sala.data.roomId });
+    expect(campoDe(await primeiro(), 'Sala')).toBe('Sala dos Testes');
+    await post('/api/rooms/password', { identity: dono, roomId: sala.data.roomId });
+  });
+
+  test('sem sala, ou com id que não existe, o relato diz que veio do lobby (e o nome nunca é do cliente)', async () => {
+    await enviar({});
+    await enviar({ room: 'nao-existe-123' });
+    await enviar({ room: '<script>alert(1)</script>' });
+    for (const m of await gravados()) expect(campoDe(m.payload!.embeds[0], 'Sala')).toBe('Fora de uma sala (lobby)');
+  });
+
+  test('nome de sala com menção em massa chega neutralizado', async () => {
+    const dono = await guest('Dono');
+    const sala = await post('/api/rooms/create', { identity: dono, name: '@everyone @here sala' });
+    await enviar({ room: sala.data.roomId });
+    const embed = await primeiro();
+    expect(campoDe(embed, 'Sala')).not.toMatch(/@everyone|@here/);
+    expect((await gravados())[0]!.payload!.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  test('conta do Discord: menção, link do perfil, nome e foto no cartão', async () => {
+    await enviar({ identity: crachaDiscord() });
+    const embed = await primeiro();
+    expect(campoDe(embed, 'Discord')).toBe(`<@${ID_DISCORD}>\n[Abrir perfil](https://discord.com/users/${ID_DISCORD})`);
+    expect(embed.author).toEqual({
+      name: 'Ana do Discord',
+      url: `https://discord.com/users/${ID_DISCORD}`,
+      icon_url: `https://cdn.discordapp.com/avatars/${ID_DISCORD}/${AVATAR}.png?size=64`,
+    });
+    // A menção aparece como nome, mas nunca pinga ninguém.
+    expect((await gravados())[0]!.payload!.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  test('o apelido que a pessoa vê aparece no cartão, sem trocar quem ela é', async () => {
+    const form = new FormData();
+    form.append('kind', 'bug');
+    form.append('title', 'Com apelido');
+    form.append('description', 'x');
+    form.append('identity', crachaDiscord());
+    form.append('name', 'Apelido Novo');
+    await fetch(`${BASE}/api/feedback`, { method: 'POST', body: form, headers: { 'x-forwarded-for': novoEndereco() } });
+    const embed = await primeiro();
+    expect(embed.author.name).toBe('Apelido Novo');
+    expect(campoDe(embed, 'Discord')).toContain(`<@${ID_DISCORD}>`); // o id continua o do crachá
+  });
+
+  test('convidado: sem link de Discord, sem foto, e o cartão diz isso', async () => {
+    await enviar({ identity: await guest('Visitante') });
+    const embed = await primeiro();
+    expect(campoDe(embed, 'Discord')).toBe('Convidado, sem conta do Discord');
+    expect(embed.author.name).toBe('Visitante');
+    expect(embed.author.url).toBeUndefined();
+    expect(embed.author.icon_url).toBeUndefined();
+  });
+
+  test('crachá forjado ou de outro tipo não vira conta do Discord', async () => {
+    const casos: [string, string][] = [
+      ['assinatura de outro segredo', assinar({ instance: 'web', uid: ID_DISCORD, name: 'Falso', av: null, scope: 'identity' }, 'outro-segredo')],
+      ['sem assinatura', Buffer.from(JSON.stringify({ uid: ID_DISCORD, name: 'Falso', scope: 'identity' })).toString('base64url') + '.'],
+      ['token de sala com id de Discord', assinar({ room: 'x', uid: ID_DISCORD, name: 'Falso', av: null, role: 'viewer' })],
+      ['crachá expirado', assinar({ instance: 'web', uid: ID_DISCORD, name: 'Falso', av: null, scope: 'identity', exp: 1 })],
+    ];
+    for (const [nome, identity] of casos) {
+      await fetch(`${MOCK}/__reset`, { method: 'POST' });
+      expect((await enviar({ identity })).status, nome).toBe(200);
+      const embed = await primeiro();
+      expect(campoDe(embed, 'Discord'), nome).toBe('Convidado, sem conta do Discord');
+      expect(embed.author, nome).toBeUndefined();
+    }
+  });
+
+  test('id que não é de Discord (convidado, teste) e foto fora do formato não geram link nem imagem', async () => {
+    await enviar({ identity: assinar({ instance: 'web', uid: 'dev-Ana', name: 'Dev Ana', av: AVATAR, scope: 'identity' }) });
+    expect(campoDe(await primeiro(), 'Discord')).toBe('Convidado, sem conta do Discord');
+
+    await fetch(`${MOCK}/__reset`, { method: 'POST' });
+    await enviar({ identity: crachaDiscord({ av: 'x".png?size=9999#<script>' }) });
+    const embed = await primeiro();
+    expect(embed.author.icon_url).toBeUndefined();
+    expect(embed.author.url).toBe(`https://discord.com/users/${ID_DISCORD}`);
+
+    await fetch(`${MOCK}/__reset`, { method: 'POST' });
+    await enviar({ identity: crachaDiscord({ uid: '123456789012345678/../../x' }) });
+    expect(campoDe(await primeiro(), 'Discord')).toBe('Convidado, sem conta do Discord');
+  });
+
+  test('nome com menção falsa no apelido não vira menção de verdade', async () => {
+    const form = new FormData();
+    form.append('kind', 'bug');
+    form.append('title', 'Apelido malicioso');
+    form.append('description', 'x');
+    form.append('identity', crachaDiscord());
+    form.append('name', '<@999999999999999999> @everyone');
+    await fetch(`${BASE}/api/feedback`, { method: 'POST', body: form, headers: { 'x-forwarded-for': novoEndereco() } });
+    const embed = await primeiro();
+    expect(embed.author.name).not.toMatch(/<@9|@everyone/);
+    expect((await gravados())[0]!.payload!.allowed_mentions).toEqual({ parse: [] });
   });
 });

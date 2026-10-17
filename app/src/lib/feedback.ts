@@ -10,7 +10,7 @@ export type FeedbackKind = 'bug' | 'feedback';
 
 export const FEEDBACK_LIMITS = {
   title: { min: 3, max: 100 },
-  description: { min: 10, max: 1500 },
+  description: { min: 1, max: 1500 },
   steps: { max: 1000 },
   contact: { max: 100 },
   images: { max: 5, maxBytes: 8 * 1024 * 1024 },
@@ -70,11 +70,9 @@ export function checkDraft(draft: FeedbackDraft): { field: FieldName; message: s
   if (draft.title.trim().length < FEEDBACK_LIMITS.title.min) {
     return { field: 'title', message: `Dê um resumo com ao menos ${FEEDBACK_LIMITS.title.min} caracteres.` };
   }
+  // Sem mínimo de caracteres: "trava" é um relato válido. Só não pode ficar em branco.
   if (draft.description.trim().length < FEEDBACK_LIMITS.description.min) {
-    return {
-      field: 'description',
-      message: `Conte um pouco mais: a descrição precisa de ao menos ${FEEDBACK_LIMITS.description.min} caracteres.`,
-    };
+    return { field: 'description', message: 'Escreva a descrição.' };
   }
   return null;
 }
@@ -99,7 +97,7 @@ export class FeedbackError extends Error {
 export async function sendFeedback(
   url: string,
   draft: FeedbackDraft,
-  context: { identity: string | null; name: string; where: string; viewport: string; website: string },
+  context: { identity: string | null; name: string; room: string | null; where: string; viewport: string; website: string },
   signal?: AbortSignal
 ): Promise<void> {
   const form = new FormData();
@@ -113,6 +111,7 @@ export async function sendFeedback(
   form.append('website', context.website);
   if (context.identity) form.append('identity', context.identity);
   form.append('name', context.name);
+  if (context.room) form.append('room', context.room);
   draft.images.forEach((image) => form.append('images', image, image.name));
 
   const timeout = AbortSignal.timeout(SEND_TIMEOUT_MS);
