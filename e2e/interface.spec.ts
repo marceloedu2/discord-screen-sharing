@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { test, expect, createRoom, joinRoom, shareScreen, shareCamera, videoCount, invite, isPlaying, setName, type User } from './fixtures';
+import { test, expect, createRoom, joinRoom, shareScreen, shareCamera, videoCount, invite, isPlaying, setName, comSom, type User } from './fixtures';
 
 const unique = (p: string) => `${p}-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
 const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
@@ -305,5 +305,68 @@ test.describe('texto e acessibilidade em todos os estados', () => {
     await bia.page.keyboard.press('Escape');
     expect(await axe(bia), 'foco, com miniaturas').toEqual([]);
     await expect(bia.page.getByRole('button', { name: /^Assistir a tela de/ }).first()).toBeVisible();
+  });
+
+  test('os botões de canto, o dock e a aba de feedback nunca se sobrepõem, de 320 a 1280 px', async ({ spawn }) => {
+    test.setTimeout(90_000);
+    const ana = await spawn('Ana');
+    const bia = await spawn('Bia');
+    await comSom(ana); // com som o dock ganha o controle de volume e fica mais largo
+    const sala = unique('geometria');
+    await createRoom(ana, sala);
+    await joinRoom(bia, sala);
+    await shareScreen(ana);
+    await invite(bia).click();
+    await expect.poll(() => videoCount(bia), { timeout: 15_000 }).toBe(1);
+    await expect(bia.page.getByRole('button', { name: 'Silenciar' })).toBeVisible({ timeout: 15_000 });
+
+    const problemas: string[] = [];
+    for (const [w, h] of [[320, 568], [390, 844], [480, 800], [600, 800], [720, 800], [820, 700], [1024, 768], [1280, 720]] as const) {
+      await bia.page.setViewportSize({ width: w, height: h });
+      await bia.page.waitForTimeout(250);
+      const caixas = await bia.page.evaluate(() => {
+        const dentro = (raiz: Element) =>
+          [...raiz.querySelectorAll('button, input[type=range]')]
+            .map((el) => ({ nome: el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.tagName, r: el.getBoundingClientRect() }))
+            .filter((x) => x.r.width > 0 && x.r.height > 0);
+        const grupos = [...document.querySelectorAll('[data-controls]')];
+        const abas = [...document.querySelectorAll('button[aria-label="Enviar feedback"]')];
+        return [...grupos.flatMap(dentro), ...abas.flatMap((a) => dentro(a.parentElement!).filter((x) => x.nome === 'Enviar feedback'))].map((x) => ({ nome: x.nome, l: x.r.left, t: x.r.top, r: x.r.right, b: x.r.bottom }));
+      });
+      // Sem repetidos (a aba entra pelos dois caminhos acima).
+      const unicas = caixas.filter((c, i) => caixas.findIndex((o) => o.nome === c.nome && o.l === c.l && o.t === c.t) === i);
+      for (let i = 0; i < unicas.length; i++) {
+        for (let j = i + 1; j < unicas.length; j++) {
+          const a = unicas[i]!;
+          const b = unicas[j]!;
+          const cruza = a.l < b.r - 1 && b.l < a.r - 1 && a.t < b.b - 1 && b.t < a.b - 1;
+          if (cruza) problemas.push(`${w}×${h}: "${a.nome}" e "${b.nome}" se sobrepõem`);
+        }
+        if (unicas[i]!.r > w + 1) problemas.push(`${w}×${h}: "${unicas[i]!.nome}" passa da borda direita`);
+        if (unicas[i]!.l < -1) problemas.push(`${w}×${h}: "${unicas[i]!.nome}" passa da borda esquerda`);
+      }
+    }
+    expect(problemas).toEqual([]);
+  });
+
+  test('aba de feedback: no meio da altura no desktop e fixada no topo no celular', async ({ spawn }) => {
+    const ana = await spawn('Ana');
+    await ana.page.goto('/');
+    const aba = ana.page.getByRole('button', { name: 'Enviar feedback' });
+    await expect(aba).toBeVisible();
+
+    for (const [w, h] of [[1280, 720], [1024, 768], [820, 900]] as const) {
+      await ana.page.setViewportSize({ width: w, height: h });
+      const r = (await aba.boundingBox())!;
+      expect(r.x + r.width, `${w}px: colada na borda direita`).toBeGreaterThanOrEqual(w - 1);
+      expect(Math.abs(r.y + r.height / 2 - h / 2), `${w}×${h}: centralizada na vertical`).toBeLessThan(4);
+    }
+    for (const [w, h] of [[719, 800], [390, 844], [320, 568]] as const) {
+      await ana.page.setViewportSize({ width: w, height: h });
+      const r = (await aba.boundingBox())!;
+      expect(r.x + r.width, `${w}px: colada na borda direita`).toBeGreaterThanOrEqual(w - 1);
+      expect(r.y, `${w}×${h}: abaixo do cabeçalho (52 px)`).toBeGreaterThanOrEqual(52);
+      expect(r.y, `${w}×${h}: fixada no topo, não no meio`).toBeLessThan(80);
+    }
   });
 });

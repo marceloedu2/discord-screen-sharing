@@ -15,6 +15,9 @@ const MAX_BODY = 64 * 1024;
 
 export type Body = Record<string, unknown>;
 
+/** O corpo passou do teto; ver `readJson` e `createRouter`. */
+const TOO_LARGE = Symbol('too-large');
+
 export interface Context {
   req: IncomingMessage;
   res: ServerResponse;
@@ -55,24 +58,29 @@ export function redirect(res: ServerResponse, to: string): void {
  * teto ou não é JSON — quem chama devolve 400 nos dois casos, porque a
  * diferença não muda nada para quem está do outro lado.
  */
-function readJson(req: IncomingMessage): Promise<Body | null> {
+function readJson(req: IncomingMessage): Promise<Body | null | typeof TOO_LARGE> {
   return new Promise((resolve) => {
     const parts: Buffer[] = [];
     let total = 0;
+    let over = false;
 
     req.on('data', (chunk: Buffer) => {
       total += chunk.length;
-      // Destruir, e não só parar de ler: sem isso quem enviou continua
-      // mandando e o socket fica ocupado até estourar o timeout.
+      if (over) return; // já respondemos 413; só descarta o resto até a conexão fechar
+      // Não destruir aqui: derrubar a conexão sem resposta deixava quem
+      // enviou (e o proxy na frente) sem nada para devolver. Quem chama
+      // responde 413 e fecha depois de enviar a resposta.
       if (total > MAX_BODY) {
-        req.destroy();
-        resolve(null);
+        over = true;
+        parts.length = 0;
+        resolve(TOO_LARGE);
         return;
       }
       parts.push(chunk);
     });
 
     req.on('end', () => {
+      if (over) return;
       if (parts.length === 0) return resolve({});
       try {
         const parsed: unknown = JSON.parse(Buffer.concat(parts).toString('utf8'));
@@ -129,6 +137,12 @@ export function createRouter(routes: Record<string, Handler>, raw: Record<string
     let body: Body = {};
     if (req.method === 'POST') {
       const parsed = await readJson(req);
+      if (parsed === TOO_LARGE) {
+        // Responde e só então fecha: o cliente recebe o 413 em vez de um reset.
+        res.setHeader('Connection', 'close');
+        res.once('finish', () => req.destroy());
+        return fail(res, 413, 'corpo grande demais');
+      }
       if (parsed === null) return fail(res, 400, 'corpo invalido');
       body = parsed;
     }

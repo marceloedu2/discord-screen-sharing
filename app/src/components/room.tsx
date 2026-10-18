@@ -1136,7 +1136,9 @@ export function Room({ guild }: { guild?: string } = {}) {
         ) : null}
 
         {/* A aba de feedback: colada na borda direita, no meio da altura, como nos
-            sites que têm esse atalho. Fica acima do palco e abaixo dos modais e
+            sites que têm esse atalho — e fixada no topo, logo abaixo do cabeçalho,
+            em telas estreitas (abaixo de 720 px), onde o meio da altura fica em cima do
+            vídeo e dos tiles. Fica acima do palco e abaixo dos modais e
             do aviso (z-10 contra z-20), e some junto dos controles em tela cheia —
             senão ela seria a única coisa na tela depois de a barra recolher. */}
         <button
@@ -1145,7 +1147,7 @@ export function Room({ guild }: { guild?: string } = {}) {
           aria-label="Enviar feedback"
           title="Enviar feedback ou relatar um bug"
           className={
-            "fixed top-1/2 right-0 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-xl bg-acento px-2 py-3 text-[13px]/none font-medium text-white shadow-[0_4px_16px_rgba(0,0,0,0.45)] transition-[opacity,padding] duration-200 hover:bg-acento-hover hover:pr-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto [&_svg]:size-[18px] [&_svg]:fill-none [&_svg]:stroke-current [&_svg]:[stroke-width:1.8] [&_svg]:[stroke-linecap:round] [&_svg]:[stroke-linejoin:round]" +
+            "fixed top-1/2 right-0 z-10 flex -translate-y-1/2 max-[720px]:top-[60px] max-[720px]:translate-y-0 flex-col items-center gap-2 rounded-l-xl bg-acento px-2 py-3 text-[13px]/none font-medium text-white shadow-[0_4px_16px_rgba(0,0,0,0.45)] transition-[opacity,padding] duration-200 hover:bg-acento-hover hover:pr-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto [&_svg]:size-[18px] [&_svg]:fill-none [&_svg]:stroke-current [&_svg]:[stroke-width:1.8] [&_svg]:[stroke-linecap:round] [&_svg]:[stroke-linejoin:round]" +
             (inRoom && !controlsVisible ? " pointer-events-none opacity-0" : " opacity-100")
           }
         >
@@ -1230,7 +1232,10 @@ export function Room({ guild }: { guild?: string } = {}) {
                         saveVolume(v);
                         connection.setVolume(v);
                       }}
-                      className="w-24 accent-acento"
+                      // Em telas estreitas o cursor sai e fica só o botão de mudo: com ele, o
+                      // dock passava da largura da tela (o "Sair da sala" ficava para fora
+                      // em 390 px), e no celular o volume do aparelho já faz esse papel.
+                      className="w-24 accent-acento max-[480px]:hidden"
                     />
                   </label>
                 ) : null}
@@ -1325,7 +1330,9 @@ export function Room({ guild }: { guild?: string } = {}) {
           <div
             data-controls
             className={
-              "absolute right-4 bottom-4 transition-opacity duration-200 " +
+              // Em telas estreitas sobe para logo acima do dock: lado a lado eles se
+              // cruzavam (o "Sair da sala" ficava coberto por estes dois botões).
+              "absolute right-4 bottom-4 max-[720px]:bottom-[76px] transition-opacity duration-200 " +
               (controlsVisible ? "opacity-100" : "pointer-events-none opacity-0")
             }
           >

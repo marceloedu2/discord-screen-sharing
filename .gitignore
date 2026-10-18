@@ -17,7 +17,7 @@ next-env.d.ts
 
 # binário do cloudflared, baixado sob demanda por "npm run tunel"
 .cache/
-prints
+prints/
 
 # ambiente — nenhum .env entra; a configuração de produção vem do ambiente
 .env*

@@ -43,6 +43,18 @@ const server = http.createServer((req, res) => {
     console.error(`[proxy] ${req.method} ${req.url} → :${port} — ${err.code || err.message}`);
     if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end(`Nada atendendo na porta ${port}. Ele ainda está subindo?`);
+    // O upload do cliente pode estar no meio: depois da resposta, fecha a conexão
+    // dele em vez de deixá-lo esperando a vez de um corpo que ninguém vai ler.
+    res.once('finish', () => req.destroy());
+  });
+
+  // O servidor de trás fechou sem nunca ter respondido (sem `error`): sem isto o
+  // cliente ficava pendurado até o próprio timeout.
+  upstream.on('close', () => {
+    if (res.headersSent || res.writableEnded) return;
+    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('O servidor fechou a conexão sem responder.');
+    res.once('finish', () => req.destroy());
   });
 
   req.pipe(upstream);

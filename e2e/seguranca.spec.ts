@@ -109,8 +109,9 @@ test.describe('autenticação e autorização', () => {
   });
 
   test('corpos hostis na API: enorme, não-JSON, tipos trocados — 4xx e servidor de pé', async () => {
-    const enorme = await fetch(`${BASE}/api/rooms/create`, { method: 'POST', body: 'x'.repeat(200_000), headers: { 'Content-Type': 'application/json' } }).catch(() => null);
-    if (enorme) expect(enorme.status).toBeGreaterThanOrEqual(400);
+    // Com prazo: o corpo gigante precisa ser respondido (413), não deixado pendurado.
+    const enorme = await fetch(`${BASE}/api/rooms/create`, { method: 'POST', body: 'x'.repeat(200_000), headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(10_000) });
+    expect(enorme.status).toBe(413);
 
     for (const corpo of ['', '{', 'null', '[]', '"x"', '{"identity":{}}', '{"identity":42,"name":[]}', '{"__proto__":{"admin":true}}']) {
       const r = await fetch(`${BASE}/api/rooms/create`, { method: 'POST', body: corpo, headers: { 'Content-Type': 'application/json' } }).catch(() => null);

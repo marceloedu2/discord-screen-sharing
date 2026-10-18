@@ -149,3 +149,42 @@ export async function isPlaying(user: User, ms = 700): Promise<boolean> {
 
 export const invite = (user: User) => user.page.getByRole('button', { name: /^Assistir a tela de/ });
 export const stopWatching = (user: User) => user.page.getByRole('button', { name: /^Parar de assistir/ });
+
+/**
+ * A captura de tela sintética do Chromium não tem faixa de som. Aqui o
+ * `getDisplayMedia` devolve um canvas animado **com** um oscilador, e marca a
+ * superfície como aba — o app só deixa o som passar de aba e janela
+ * (RN-TRX-24), nunca de tela inteira.
+ */
+export async function comSom(user: User, surface: 'browser' | 'window' | 'monitor' = 'browser') {
+  await user.context.addInitScript((displaySurface) => {
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280;
+      canvas.height = 720;
+      const g = canvas.getContext('2d')!;
+      let t = 0;
+      setInterval(() => {
+        g.fillStyle = `hsl(${(t += 6) % 360} 80% 40%)`;
+        g.fillRect(0, 0, 1280, 720);
+        g.fillStyle = '#fff';
+        g.font = '64px sans-serif';
+        g.fillText(String(t), 100, 200);
+      }, 33);
+      const stream = canvas.captureStream(30);
+      const ac = new AudioContext({ sampleRate: 48000 });
+      const osc = ac.createOscillator();
+      const dest = ac.createMediaStreamDestination();
+      osc.frequency.value = 440;
+      osc.connect(dest);
+      osc.start();
+      void ac.resume();
+      stream.addTrack(dest.stream.getAudioTracks()[0]!);
+      const video = stream.getVideoTracks()[0]!;
+      const base = video.getSettings.bind(video);
+      video.getSettings = () => ({ ...base(), displaySurface } as MediaTrackSettings);
+      return stream;
+    };
+  }, surface);
+}
+
