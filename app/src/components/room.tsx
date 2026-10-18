@@ -1003,16 +1003,6 @@ export function Room({ guild }: { guild?: string } = {}) {
 
         <button
           type="button"
-          onClick={() => setFeedbackOpen(true)}
-          aria-label="Enviar feedback"
-          title="Enviar feedback ou relatar um bug"
-          className="grid size-8 shrink-0 place-items-center rounded-full text-suave hover:bg-tile hover:text-texto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto [&_svg]:size-[18px] [&_svg]:fill-none [&_svg]:stroke-current [&_svg]:[stroke-width:1.8] [&_svg]:[stroke-linecap:round] [&_svg]:[stroke-linejoin:round]"
-        >
-          <Icon.Feedback />
-        </button>
-
-        <button
-          type="button"
           onClick={() => setProfileOpen(true)}
           // Sem aria-label: o nome vem do conteúdo, e o rótulo visível ("C9
           // Convidado 9325", com as iniciais do avatar) tem que estar contido
@@ -1144,6 +1134,26 @@ export function Room({ guild }: { guild?: string } = {}) {
             }}
           />
         ) : null}
+
+        {/* A aba de feedback: colada na borda direita, no meio da altura, como nos
+            sites que têm esse atalho. Fica acima do palco e abaixo dos modais e
+            do aviso (z-10 contra z-20), e some junto dos controles em tela cheia —
+            senão ela seria a única coisa na tela depois de a barra recolher. */}
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          aria-label="Enviar feedback"
+          title="Enviar feedback ou relatar um bug"
+          className={
+            "fixed top-1/2 right-0 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-xl bg-acento px-2 py-3 text-[13px]/none font-medium text-white shadow-[0_4px_16px_rgba(0,0,0,0.45)] transition-[opacity,padding] duration-200 hover:bg-acento-hover hover:pr-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto [&_svg]:size-[18px] [&_svg]:fill-none [&_svg]:stroke-current [&_svg]:[stroke-width:1.8] [&_svg]:[stroke-linecap:round] [&_svg]:[stroke-linejoin:round]" +
+            (inRoom && !controlsVisible ? " pointer-events-none opacity-0" : " opacity-100")
+          }
+        >
+          <Icon.Feedback />
+          <span aria-hidden="true" className="[text-orientation:mixed] [writing-mode:vertical-rl]">
+            Feedback
+          </span>
+        </button>
 
         {feedbackOpen ? (
           <FeedbackModal
