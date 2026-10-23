@@ -58,9 +58,26 @@ function report(severity, context, title, detail) {
 
 // --- Ponte com a CLI -------------------------------------------------------
 
+/**
+ * O executável da CLI.
+ *
+ * No Windows o npm instala um `agent-browser.cmd`, que o execFileSync não
+ * executa sem shell (ENOENT) — e com shell os argumentos passariam pelo
+ * cmd.exe. O .cmd só repassa para o binário nativo, então vamos direto nele.
+ */
+const AB_BIN = (() => {
+  if (process.platform !== 'win32') return 'agent-browser';
+  try {
+    const shim = execFileSync('where', ['agent-browser.cmd'], { encoding: 'utf8' }).split(/\r?\n/)[0];
+    return join(dirname(shim), 'node_modules', 'agent-browser', 'bin', 'agent-browser-win32-x64.exe');
+  } catch {
+    return 'agent-browser';
+  }
+})();
+
 function ab(args, input) {
   try {
-    const output = execFileSync('agent-browser', ['--session', SESSION, ...args, '--json'], {
+    const output = execFileSync(AB_BIN, ['--session', SESSION, ...args, '--json'], {
       input: input,
       encoding: 'utf8',
       maxBuffer: 128 * 1024 * 1024,
