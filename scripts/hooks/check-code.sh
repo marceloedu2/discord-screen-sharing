@@ -29,7 +29,7 @@ case "$FILE" in
 esac
 case "$FILE" in
   "$ROOT"/node_modules/*|"$ROOT"/*/node_modules/*) exit 0 ;;
-  "$ROOT"/app/.next/*|"$ROOT"/server/dist/*|"$ROOT"/.agent-browser/*) exit 0 ;;
+  "$ROOT"/app/.next/*|"$ROOT"/server/dist/*|"$ROOT"/bot/dist/*|"$ROOT"/.agent-browser/*) exit 0 ;;
 esac
 
 RELATIVE="${FILE#"$ROOT"/}"
@@ -38,6 +38,7 @@ RELATIVE="${FILE#"$ROOT"/}"
 case "$RELATIVE" in
   app/*)    PKG="$ROOT/app" ;;
   server/*) PKG="$ROOT/server" ;;
+  bot/*)    PKG="$ROOT/bot" ;;
   *)        PKG="" ;;
 esac
 
