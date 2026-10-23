@@ -9,7 +9,7 @@
  */
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -172,7 +172,12 @@ export function up({ dev = false, origin = null } = {}) {
 }
 
 // Executado direto (`npm run dev`, `npm start`), e não importado.
-if (import.meta.url === `file://${process.argv[1]}`) {
+//
+// A comparação precisa passar por pathToFileURL: no Windows process.argv[1]
+// vem com barra invertida e sem a barra extra do esquema ("c:\..."), enquanto
+// import.meta.url é sempre "file:///c:/..." — concatenar "file://" na frente
+// do argv nunca bate, e o bloco abaixo nunca rodava.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const dev = process.argv.includes('--dev');
   console.log('\n  Subindo entrada, app e servidor…  Ctrl+C derruba os três.\n');
   const { PORT } = up({ dev });

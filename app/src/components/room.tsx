@@ -139,6 +139,12 @@ export function Room({ guild }: { guild?: string } = {}) {
   // (RF-AST-14). Vive no snapshot da conexão pelo mesmo motivo do volume: ler
   // localStorage na renderização quebraria a hidratação.
   const showPeople = room.showPeople;
+  // "Só transmissões assistidas" filtra o que a sala mostra, e vale mais que
+  // "Participantes sem vídeo": com ela ligada, quem não transmite some também.
+  const view = room.onlyWatched
+    ? { ...room, streams: room.streams.filter((s) => room.watching.includes(s.slot)) }
+    : room;
+  const peopleVisible = showPeople && !room.onlyWatched;
   // Qual tela está no palco quando o modo é foco. Fica aqui, e não na conexão,
   // porque se refere a uma transmissão específica — que não existe na próxima
   // visita (RN-AST-34).
@@ -204,10 +210,11 @@ export function Room({ guild }: { guild?: string } = {}) {
   const toast = useCallback((text: string, error = false) => setNotice({ text, error }), []);
 
   // Só alimenta a conexão com o que estava guardado; quem publica o valor para
-  // a interface é ela, pelo snapshot.
+  // a interface é ela, pelo snapshot. Na Activity o layout guardado não vale:
+  // a sala abre sempre com as opções desmarcadas.
   useEffect(() => {
-    connection.loadVolumes(readVolume(), readVolumes());
-  }, [connection]);
+    connection.loadVolumes(readVolume(), readVolumes(), inDiscord);
+  }, [connection, inDiscord]);
 
   /**
    * Entra e sai de tela cheia (RF-AST-4).
@@ -748,7 +755,7 @@ export function Room({ guild }: { guild?: string } = {}) {
     mode: () => connection.setMode(room.mode === "grid" ? "focus" : "grid"),
     people: () => connection.setShowPeople(!showPeople),
     toStage: (i) => {
-      const target = room.streams[i];
+      const target = view.streams[i];
       if (!target) return;
       setFocused(target.slot);
       connection.setMode("focus");
@@ -1019,13 +1026,18 @@ export function Room({ guild }: { guild?: string } = {}) {
           controles cobrem o rodapé dos tiles e o nome de quem está neles. */}
       <main className={`relative min-h-0 flex-1 ${inRoom ? "pb-[76px]" : ""}`}>
         {inRoom ? (
-          room.mode === "focus" && room.streams.length > 0 ? (
+          room.onlyWatched && view.streams.length === 0 && room.phase !== "down" ? (
+            <Panel
+              title="Nenhuma transmissão assistida"
+              text="Desmarque “Só transmissões assistidas” no menu para ver o resto da sala."
+            />
+          ) : room.mode === "focus" && view.streams.length > 0 ? (
             <Stage
-              room={room}
+              room={view}
               connection={connection}
               myId={eu.id}
               fullscreen={fullscreen}
-              showWithoutVideo={showPeople}
+              showWithoutVideo={peopleVisible}
               focused={focused}
               pinned={pinned}
               onFocus={setFocused}
@@ -1033,12 +1045,12 @@ export function Room({ guild }: { guild?: string } = {}) {
               onMenu={(slot, userId, x, y) => setTileMenu({ slot, userId, x, y })}
               poppedOut={poppedOut}
             />
-          ) : room.streams.length > 0 || room.participants.length > 0 ? (
+          ) : view.streams.length > 0 || room.participants.length > 0 ? (
             <Grid
-              room={room}
+              room={view}
               connection={connection}
               myId={eu.id}
-              showWithoutVideo={showPeople}
+              showWithoutVideo={peopleVisible}
               onFocus={(slot) => {
                 setFocused(slot);
                 connection.setMode("focus");
@@ -1262,6 +1274,11 @@ export function Room({ guild }: { guild?: string } = {}) {
                         label="Participantes sem vídeo"
                         checked={showPeople}
                         onToggle={() => connection.setShowPeople(!showPeople)}
+                      />
+                      <CheckItem
+                        label="Só transmissões assistidas"
+                        checked={room.onlyWatched}
+                        onToggle={() => connection.setOnlyWatched(!room.onlyWatched)}
                       />
                       <Separator />
                       {/* Só o dono troca a senha. O servidor confere de novo

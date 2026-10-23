@@ -64,7 +64,14 @@ export function connectGateway(): void {
     acked = true;
 
     ws.on('message', (raw) => {
-      const payload = JSON.parse(String(raw)) as Payload;
+      // `RawData` pode chegar como Buffer, ArrayBuffer ou fragmentos; `String()`
+      // só acerta o primeiro caso.
+      const text = Array.isArray(raw)
+        ? Buffer.concat(raw)
+        : Buffer.isBuffer(raw)
+          ? raw
+          : Buffer.from(raw);
+      const payload = JSON.parse(text.toString()) as Payload;
       if (payload.s !== null) seq = payload.s;
 
       switch (payload.op) {
