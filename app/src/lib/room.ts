@@ -49,6 +49,11 @@ export interface RoomSnapshot {
   volume: number;
   /** Quem não transmite aparece na grade? (RF-AST-14, "sem vídeo"). */
   showPeople: boolean;
+  /**
+   * Só as transmissões assistidas aparecem? Vale mais que `showPeople`: com
+   * ela ligada, quem não transmite também some.
+   */
+  onlyWatched: boolean;
   /** 'grid' mostra todo mundo em células iguais; 'focus' dá o palco a uma tela. */
   mode: 'grid' | 'focus';
   /** 'connecting' até o primeiro open; 'down' enquanto o backoff espera. */
@@ -65,6 +70,7 @@ const EMPTY: RoomSnapshot = {
   quality: {},
   volume: 1,
   showPeople: true,
+  onlyWatched: false,
   mode: 'grid',
   phase: 'idle',
 };
@@ -155,6 +161,7 @@ export class RoomConnection {
   #volume = 1;
   #volumePerPerson = new Map<string, number>();
   #showPeople = true;
+  #onlyWatched = false;
   /** Quando o servidor avisou descarte por backpressure, por slot (RF-AST-18). */
   #drops = new Map<number, number>();
   #sampler: ReturnType<typeof setInterval> | null = null;
@@ -177,6 +184,17 @@ export class RoomConnection {
     for (const listener of this.#listeners) listener();
   }
 
+  /** Volta ao snapshot vazio, mas com as preferências de quem assiste. */
+  #publishReset(): void {
+    this.#publish({
+      ...EMPTY,
+      volume: this.#volume,
+      showPeople: this.#showPeople,
+      onlyWatched: this.#onlyWatched,
+      mode: this.#mode,
+    });
+  }
+
   // ----------------------------------------------------------------- ciclo
 
   connect(
@@ -197,7 +215,7 @@ export class RoomConnection {
     // decodificador vivo de lá desenharia a tela errada no mesmo número.
     this.#reset();
     this.#everOpened = false;
-    this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
+    this.#publishReset();
 
     this.#wsUrl = wsUrl;
     this.#tokens = tokens;
@@ -257,7 +275,7 @@ export class RoomConnection {
       // Saímos da sala de propósito: nada a reconectar (RN-AST-26). A diferença
       // é `#tokens` ainda existir ou não.
       if (!this.#tokens) {
-        this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
+        this.#publishReset();
         return;
       }
 
@@ -266,7 +284,7 @@ export class RoomConnection {
       // navegador está offline, é só a rede — segue tentando (RN-AST-36).
       if (!opened && !this.#everOpened && navigator.onLine !== false) {
         this.#tokens = null;
-        this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
+        this.#publishReset();
         this.#handlers.onRejected?.();
         return;
       }
@@ -686,15 +704,35 @@ export class RoomConnection {
     this.#publish({ showPeople: visible });
   }
 
-  /** Restaura os volumes guardados antes de qualquer som começar. */
-  loadVolumes(overall: number, perPerson: Map<string, number>): void {
+  /** Mostra só as transmissões assistidas, ou tudo, e guarda a escolha. */
+  setOnlyWatched(only: boolean): void {
+    this.#onlyWatched = only;
+    store('assistidas', only ? '1' : '0');
+    this.#publish({ onlyWatched: only });
+  }
+
+  /**
+   * Restaura os volumes guardados antes de qualquer som começar.
+   *
+   * Com `freshLayout` (a Activity do Discord) o layout guardado é ignorado e a
+   * sala abre com as três opções desmarcadas; o volume continua restaurado.
+   */
+  loadVolumes(overall: number, perPerson: Map<string, number>, freshLayout = false): void {
     this.#volume = overall;
     this.#volumePerPerson = perPerson;
-    this.#showPeople = read('pessoas') !== '0';
-    this.#mode = read('modo') === 'foco' ? 'focus' : 'grid';
+    if (freshLayout) {
+      this.#showPeople = false;
+      this.#onlyWatched = false;
+      this.#mode = 'focus';
+    } else {
+      this.#showPeople = read('pessoas') !== '0';
+      this.#onlyWatched = read('assistidas') === '1';
+      this.#mode = read('modo') === 'foco' ? 'focus' : 'grid';
+    }
     this.#publish({
       volume: overall,
       showPeople: this.#showPeople,
+      onlyWatched: this.#onlyWatched,
       mode: this.#mode,
     });
   }
@@ -741,6 +779,6 @@ export class RoomConnection {
     this.#timer = null;
     this.#ws?.close();
     this.#ws = null;
-    this.#publish({ ...EMPTY, volume: this.#volume, showPeople: this.#showPeople, mode: this.#mode });
+    this.#publishReset();
   }
 }
