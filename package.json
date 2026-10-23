@@ -5,12 +5,15 @@
   "type": "module",
   "workspaces": [
     "app",
-    "server"
+    "server",
+    "bot"
   ],
   "scripts": {
     "dev": "node scripts/up.mjs --dev",
     "build": "npm run build --workspaces --if-present",
     "start": "npm run build && node scripts/up.mjs",
+    "bot": "npm run dev -w bot",
+    "bot:start": "npm run build -w bot && npm run start -w bot",
     "tunnel": "node scripts/tunnel.mjs",
     "tunnel:create": "node scripts/tunnel-create.mjs",
     "types": "npm run types --workspaces --if-present",
